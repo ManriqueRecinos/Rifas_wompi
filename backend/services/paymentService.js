@@ -78,7 +78,7 @@ class PaymentService {
             if (metodo_pago === 'wompi') {
                 const accessToken = await this.getWompiToken();
                 const wompiData = {
-                    identificadorEnlaceComercio: orden_id.substring(0, 30),
+                    identificadorEnlaceComercio: orden_id,
                     monto: totalMonto,
                     nombreProducto: `Tickets Rifa: ${raffle.nombre}`,
                     configuracion: {
@@ -110,14 +110,39 @@ class PaymentService {
     }
 
     async handleWebhook(payload) {
-        const { idEnlace, estado, informacionAdicional } = payload;
-        const orden_id = informacionAdicional?.orden_id;
+        console.log('Recibiendo Webhook de Wompi:', JSON.stringify(payload, null, 2));
 
-        if (estado === 'Pagado') {
-            await db.query('UPDATE orden_pago SET estado = \'pagado\' WHERE id = $1', [orden_id]);
-            await ticketRepository.updateTicketsByOrden(orden_id, 'pagado');
-        } else if (estado === 'Fallido') {
-            await db.query('UPDATE orden_pago SET estado = \'fallido\' WHERE id = $1', [orden_id]);
+        // Enlaces de pago de Wompi suelen enviar idEnlace y estado
+        const { idEnlace, estado, identificadorEnlaceComercio } = payload;
+        
+        // El identificadorEnlaceComercio es nuestro orden_id (lo enviamos al crear el enlace)
+        const orden_id = identificadorEnlaceComercio;
+
+        try {
+            if (estado === 'Pagado') {
+                console.log(`Pago confirmado para la orden: ${orden_id}`);
+                
+                // 1. Actualizar estado de la orden
+                await db.query(
+                    'UPDATE orden_pago SET estado = \'pagado\' WHERE id = $1 OR referencia_externa = $2',
+                    [orden_id, idEnlace]
+                );
+
+                // 2. Actualizar tickets asociados a esa orden a estado 'pagado'
+                // Esto es lo que confirma la venta final
+                await ticketRepository.updateTicketsByOrden(orden_id, 'pagado');
+                
+                console.log(`Tickets de la orden ${orden_id} marcados como PAGADOS.`);
+            } else if (estado === 'Fallido' || estado === 'Rechazado') {
+                console.log(`Pago fallido para la orden: ${orden_id}`);
+                await db.query(
+                    'UPDATE orden_pago SET estado = \'fallido\' WHERE id = $1 OR referencia_externa = $2',
+                    [orden_id, idEnlace]
+                );
+            }
+        } catch (error) {
+            console.error('Error procesando webhook:', error.message);
+            throw error;
         }
     }
 }
