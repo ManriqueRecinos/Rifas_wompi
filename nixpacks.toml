@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs"]
+
+[phases.install]
+cmds = ["npm install --prefix backend"]
+
+[phases.build]
+cmds = ["echo 'Build skipped or handled by subfolders'"]
+
+[start]
+cmd = "npm start --prefix backend"
