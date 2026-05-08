@@ -67,7 +67,8 @@ class PaymentService {
             // Si es contraentrega, marcamos los tickets como entregados/pagados de una vez
             const estadoTicket = metodo_pago === 'contraentrega' ? 'entregado' : 'reservado';
             
-            await ticketRepository.createReservedTickets(client, rifa_id, cantidad, finalUsuarioId, currentParticipanteId, orden_id);
+            const tickets = await ticketRepository.createReservedTickets(client, rifa_id, cantidad, finalUsuarioId, currentParticipanteId, orden_id);
+            const numerosTickets = tickets.map(t => t.numero).join(', ');
             
             if (metodo_pago === 'contraentrega') {
                 await ticketRepository.updateTicketsByOrden(orden_id, 'entregado');
@@ -80,7 +81,7 @@ class PaymentService {
                 const wompiData = {
                     identificadorEnlaceComercio: orden_id,
                     monto: totalMonto,
-                    nombreProducto: `Tickets Rifa: ${raffle.nombre}`,
+                    nombreProducto: `Rifa: ${raffle.nombre} (Tickets: ${numerosTickets})`,
                     configuracion: {
                         urlRedirect: `${process.env.FRONTEND_URL}/pago-confirmacion/${orden_id}`,
                         esMontoEditable: false,
@@ -98,7 +99,7 @@ class PaymentService {
             }
 
             await client.query('COMMIT');
-            return { orden_id, checkout_url };
+            return { orden_id, checkout_url, tickets: numerosTickets };
 
         } catch (error) {
             await client.query('ROLLBACK');
