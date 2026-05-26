@@ -48,6 +48,52 @@ async function ensureRaffleImageColumns() {
        WHERE image_urls IS NULL
           OR image_urls = '[]'::jsonb
     `);
+
+    await pool.query(`
+      ALTER TABLE raffles
+      ADD COLUMN IF NOT EXISTS winning_ticket_id INTEGER
+    `);
+
+    await pool.query(`
+      ALTER TABLE raffles
+      ADD COLUMN IF NOT EXISTS winning_ticket_ids JSONB DEFAULT '[]'::jsonb
+    `);
+
+    await pool.query(`
+      UPDATE raffles
+         SET winning_ticket_ids = CASE
+           WHEN winning_ticket_id IS NULL THEN '[]'::jsonb
+           ELSE jsonb_build_array(winning_ticket_id)
+         END
+       WHERE winning_ticket_ids IS NULL
+          OR winning_ticket_ids = '[]'::jsonb
+    `);
+
+    await pool.query(`
+      ALTER TABLE raffle_tickets
+      ADD COLUMN IF NOT EXISTS validation_code VARCHAR(255)
+    `);
+
+    await pool.query(`
+      UPDATE raffle_tickets
+         SET validation_code = COALESCE(validation_code, replace(uuid_generate_v4()::text, '-', ''))
+       WHERE validation_code IS NULL OR validation_code = ''
+    `);
+
+    await pool.query(`
+      UPDATE raffle_tickets
+         SET status = 'winner'
+       WHERE id IN (
+         SELECT (jsonb_array_elements_text(winning_ticket_ids))::int
+         FROM raffles
+         WHERE winning_ticket_ids IS NOT NULL AND winning_ticket_ids <> '[]'::jsonb
+       )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_validation_code
+      ON raffle_tickets(validation_code)
+    `);
   } catch (err) {
     console.error('No se pudo preparar la columna image_urls en raffles:', err.message);
   }

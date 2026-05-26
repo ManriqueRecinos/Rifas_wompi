@@ -269,7 +269,12 @@ export default function RaffleDetail() {
                 <div key={t.id} className="ticket-card" style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontFamily: 'Bebas Neue, sans-serif', fontSize: '20px', color: 'var(--accent)' }}>Ticket #{t.ticket_number}</span>
-                    <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text3)' }}>{new Date(t.purchased_at).toLocaleDateString()}</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {raffle.winning_ticket_id === t.id && (
+                        <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#4ade80', fontWeight: 800 }}>Ganador</span>
+                      )}
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text3)' }}>{new Date(t.purchased_at).toLocaleDateString()}</span>
+                    </div>
                   </div>
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div style={{ fontSize: '14px', color: 'var(--text)' }}>

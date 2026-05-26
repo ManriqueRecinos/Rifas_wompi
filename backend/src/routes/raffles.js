@@ -1,12 +1,15 @@
 const express         = require('express');
 const multer          = require('multer');
 const fs              = require('fs/promises');
+const crypto          = require('crypto');
 const pool            = require('../db');
 const auth            = require('../middleware/auth');
 const wompi           = require('../services/wompiService');
 const { uploadImage } = require('../services/cloudinaryService');
 const router          = express.Router();
 const upload          = multer({ dest: '/tmp/' });
+
+const VALIDATION_SECRET = process.env.VALIDATION_SECRET || process.env.JWT_SECRET || 'rifas-validation-secret';
 
 function collectImageFiles(req) {
   const files = Array.isArray(req.files) ? req.files : [];
@@ -34,6 +37,124 @@ async function getNextTicketSequenceStart(client, raffleId) {
     [raffleId],
   );
   return parseInt(rows[0].cnt, 10) + 1;
+}
+
+async function selectAutomaticWinner(client, raffleId) {
+  const { rows: raffleRows } = await client.query(
+    'SELECT id, winning_ticket_id FROM raffles WHERE id=$1', [raffleId],
+  );
+  if (!raffleRows.length || raffleRows[0].winning_ticket_id) {
+    return raffleRows[0]?.winning_ticket_id || null;
+  }
+
+  const { rows: ticketRows } = await client.query(
+    'SELECT id FROM raffle_tickets WHERE raffle_id=$1 ORDER BY id ASC', [raffleId],
+  );
+  if (!ticketRows.length) return null;
+
+  const winner = ticketRows[crypto.randomInt(ticketRows.length)].id;
+  const winnerIds = [winner];
+  await client.query(
+    `UPDATE raffles
+        SET winning_ticket_id=$1, winning_ticket_ids=$2, status='completed', updated_at=NOW()
+      WHERE id=$3`,
+    [winner, JSON.stringify(winnerIds), raffleId],
+  );
+  return winner;
+}
+
+async function finalizeManualDraw(client, raffleId, winnerTicketIds = [], eliminatedTicketIds = []) {
+  const { rows: raffleRows } = await client.query(
+    'SELECT id, user_id, winning_ticket_id, winning_ticket_ids FROM raffles WHERE id=$1', [raffleId],
+  );
+
+  if (!raffleRows.length) {
+    throw new Error('Rifa no encontrada');
+  }
+
+  const raffle = raffleRows[0];
+  const winnerIds = [...new Set((Array.isArray(winnerTicketIds) ? winnerTicketIds : [winnerTicketIds]).map((value) => parseInt(value, 10)).filter(Boolean))];
+  const uniqueEliminatedIds = [...new Set((eliminatedTicketIds || []).map((value) => parseInt(value, 10)).filter(Boolean))];
+
+  if (winnerIds.length) {
+    const { rows: winnerRows } = await client.query(
+      'SELECT id FROM raffle_tickets WHERE raffle_id=$1 AND id = ANY($2::int[])',
+      [raffleId, winnerIds],
+    );
+    if (winnerRows.length !== winnerIds.length) {
+      throw new Error('Uno o más tickets ganadores no fueron encontrados');
+    }
+  }
+
+  if (uniqueEliminatedIds.length) {
+    await client.query(
+      `UPDATE raffle_tickets
+          SET status='eliminated'
+        WHERE raffle_id=$1 AND id = ANY($2::int[]) AND NOT (id = ANY($3::int[]))`,
+      [raffleId, uniqueEliminatedIds, winnerIds.length ? winnerIds : [0]],
+    );
+  }
+
+  if (winnerIds.length) {
+    await client.query(
+      `UPDATE raffle_tickets
+          SET status='winner'
+        WHERE raffle_id=$1 AND id = ANY($2::int[])`,
+      [raffleId, winnerIds],
+    );
+
+    await client.query(
+      `UPDATE raffles
+          SET winning_ticket_id=$1,
+              winning_ticket_ids=$2,
+              status='completed',
+              updated_at=NOW()
+        WHERE id=$2`,
+      [winnerIds[0], JSON.stringify(winnerIds), raffleId],
+    );
+    return { winnerTicketIds: winnerIds, eliminatedTicketIds: uniqueEliminatedIds };
+  }
+
+  if (raffle.winning_ticket_id) {
+    return { winnerTicketIds: raffle.winning_ticket_ids || [raffle.winning_ticket_id], eliminatedTicketIds: uniqueEliminatedIds };
+  }
+
+  return { winnerTicketIds: [], eliminatedTicketIds: uniqueEliminatedIds };
+}
+
+function createValidationCode(raffleId, ticketNumber) {
+  const nonce = crypto.randomBytes(10).toString('hex');
+  const payload = `${raffleId}.${ticketNumber}.${nonce}`;
+  const signature = crypto
+    .createHmac('sha256', VALIDATION_SECRET)
+    .update(payload)
+    .digest('hex')
+    .slice(0, 24);
+  return Buffer.from(`${payload}.${signature}`).toString('base64url');
+}
+
+function verifyValidationCode(code) {
+  try {
+    const raw = Buffer.from(code, 'base64url').toString('utf8');
+    const parts = raw.split('.');
+    if (parts.length !== 4) return false;
+    const payload = parts.slice(0, 3).join('.');
+    const signature = parts[3];
+    const expected = crypto
+      .createHmac('sha256', VALIDATION_SECRET)
+      .update(payload)
+      .digest('hex')
+      .slice(0, 24);
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+function getPrimaryRaffleImage(raffle) {
+  return Array.isArray(raffle.image_urls) && raffle.image_urls.length > 0
+    ? raffle.image_urls[0]
+    : raffle.image_url || null;
 }
 
 // ── Listar rifas públicas ────────────────────────────────────
@@ -71,6 +192,61 @@ router.get('/mine', auth, async (req, res) => {
   }
 });
 
+// ── Validar ticket público por código QR ──────────────────────
+router.get('/validate-ticket/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    if (!verifyValidationCode(code)) {
+      return res.status(400).json({ error: 'Código de validación inválido' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
+              r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
+              r.draw_date, r.status AS raffle_status, r.winning_ticket_id, r.winning_ticket_ids,
+              u.name AS organizer_name
+         FROM raffle_tickets t
+         JOIN raffles r ON r.id = t.raffle_id
+         JOIN users u ON u.id = r.user_id
+        WHERE t.validation_code = $1`,
+      [code],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = rows[0];
+    const winningIds = Array.isArray(ticket.winning_ticket_ids)
+      ? ticket.winning_ticket_ids.map((value) => parseInt(value, 10)).filter(Boolean)
+      : [];
+    const isWinner = winningIds.includes(ticket.id) || (ticket.winning_ticket_id && ticket.winning_ticket_id === ticket.id);
+
+    res.json({
+      valid: true,
+      isWinner,
+      ticket: {
+        id: ticket.id,
+        ticket_number: ticket.ticket_number,
+        buyer_name: ticket.buyer_name,
+        buyer_email: ticket.buyer_email,
+        amount_paid: ticket.amount_paid,
+        purchased_at: ticket.purchased_at,
+        raffle_title: ticket.raffle_title,
+        raffle_description: ticket.raffle_description,
+        raffle_image: getPrimaryRaffleImage(ticket),
+        draw_date: ticket.draw_date,
+        organizer_name: ticket.organizer_name,
+        raffle_status: ticket.raffle_status,
+        is_winner: isWinner,
+      },
+    });
+  } catch (err) {
+    console.error('[Validate-Ticket] Error:', err);
+    res.status(500).json({ error: 'Error al validar el ticket' });
+  }
+});
+
 // ── Detalle de una rifa ───────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
@@ -87,6 +263,57 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── Crear rifa + enlace Wompi ─────────────────────────────────
+
+// ── Validar ticket público por código QR ──────────────────────
+router.get('/validate-ticket/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    if (!verifyValidationCode(code)) {
+      return res.status(400).json({ error: 'Código de validación inválido' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
+              r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
+              r.draw_date, r.status AS raffle_status, r.winning_ticket_id,
+              u.name AS organizer_name
+         FROM raffle_tickets t
+         JOIN raffles r ON r.id = t.raffle_id
+         JOIN users u ON u.id = r.user_id
+        WHERE t.validation_code = $1`,
+      [code],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = rows[0];
+    const isWinner = ticket.winning_ticket_id && ticket.winning_ticket_id === ticket.id;
+
+    res.json({
+      valid: true,
+      isWinner,
+      ticket: {
+        id: ticket.id,
+        ticket_number: ticket.ticket_number,
+        buyer_name: ticket.buyer_name,
+        buyer_email: ticket.buyer_email,
+        amount_paid: ticket.amount_paid,
+        purchased_at: ticket.purchased_at,
+        raffle_title: ticket.raffle_title,
+        raffle_description: ticket.raffle_description,
+        raffle_image: getPrimaryRaffleImage(ticket),
+        draw_date: ticket.draw_date,
+        organizer_name: ticket.organizer_name,
+        raffle_status: ticket.raffle_status,
+      },
+    });
+  } catch (err) {
+    console.error('[Validate-Ticket] Error:', err);
+    res.status(500).json({ error: 'Error al validar el ticket' });
+  }
+});
 router.post('/', auth, upload.any(), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -236,6 +463,7 @@ router.get('/tickets/:ticketId/pdf', auth, async (req, res) => {
       drawDate:          ticket.draw_date,
       transactionId:     ticket.wompi_transaction_id || 'EFECTIVO',
       purchasedAt:       ticket.purchased_at,
+      validationCode:    ticket.validation_code || createValidationCode(ticket.raffle_id, ticket.ticket_number),
     });
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -283,6 +511,12 @@ router.post('/tickets/:ticketId/resend', auth, async (req, res) => {
     // Volver a generar el buffer PDF con Puppeteer
     const { generateTicketPDF } = require('../services/ticketService');
     const { sendTicketEmail } = require('../services/emailService');
+    const validationCode = ticket.validation_code || createValidationCode(ticket.raffle_id, ticket.ticket_number);
+
+    if (!ticket.validation_code) {
+      await pool.query('UPDATE raffle_tickets SET validation_code=$1 WHERE id=$2', [validationCode, ticket.id]);
+      ticket.validation_code = validationCode;
+    }
 
     const pdfBuffer = await generateTicketPDF({
       ticketNumber:      ticket.ticket_number,
@@ -295,6 +529,7 @@ router.post('/tickets/:ticketId/resend', auth, async (req, res) => {
       drawDate:          ticket.draw_date,
       transactionId:     ticket.wompi_transaction_id || 'EFECTIVO',
       purchasedAt:       ticket.purchased_at,
+      validationCode,
     });
 
     // Enviar correo
@@ -350,14 +585,15 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
     const createdTickets = [];
     for (let index = 0; index < quantity; index += 1) {
       const ticketNumber = String(startSequence + index).padStart(4, '0');
+      const validationCode = createValidationCode(raffle.id, ticketNumber);
       const txId = `CASH-${raffle.id}-${ticketNumber}-${Date.now().toString().slice(-4)}${quantity > 1 ? `-${index + 1}` : ''}`;
 
       const { rows: ticketRows } = await client.query(
         `INSERT INTO raffle_tickets
            (raffle_id, ticket_number, buyer_name, buyer_email,
-            wompi_transaction_id, wompi_authorization_code, amount_paid, status)
-         VALUES($1,$2,$3,$4,$5,'CASH_OK',$6,'confirmed') RETURNING *`,
-        [raffle.id, ticketNumber, buyer_name, buyer_email, txId, raffle.ticket_price],
+            wompi_transaction_id, wompi_authorization_code, amount_paid, validation_code, status)
+         VALUES($1,$2,$3,$4,$5,'CASH_OK',$6,$7,'confirmed') RETURNING *`,
+        [raffle.id, ticketNumber, buyer_name, buyer_email, txId, raffle.ticket_price, validationCode],
       );
 
       const ticket = ticketRows[0];
@@ -373,6 +609,7 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
         drawDate: raffle.draw_date,
         transactionId: txId,
         purchasedAt: ticket.purchased_at,
+        validationCode,
       });
 
       try {
@@ -408,6 +645,13 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
       'UPDATE raffles SET sold_tickets=sold_tickets+$1 WHERE id=$2', [quantity, raffle.id],
     );
 
+    const { rows: raffleAfterRows } = await client.query(
+      'SELECT sold_tickets, total_tickets FROM raffles WHERE id=$1', [raffle.id],
+    );
+    if (raffleAfterRows[0]?.sold_tickets >= raffleAfterRows[0]?.total_tickets) {
+      await selectAutomaticWinner(client, raffle.id);
+    }
+
     await client.query('COMMIT');
     res.status(201).json({ success: true, tickets: createdTickets });
   } catch (err) {
@@ -426,6 +670,53 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
     await client.query('BEGIN');
 
     const raffleId = parseInt(req.params.id, 10);
+
+// ── Finalizar sorteo manual ───────────────────────────────────
+router.post('/:id/manual-draw', auth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const raffleId = parseInt(req.params.id, 10);
+    const { winner_ticket_id, winner_ticket_ids = [], eliminated_ticket_ids = [] } = req.body;
+    const normalizedWinnerIds = Array.isArray(winner_ticket_ids) && winner_ticket_ids.length
+      ? winner_ticket_ids
+      : (winner_ticket_id ? [winner_ticket_id] : []);
+
+    const { rows: raffleRows } = await client.query(
+      'SELECT user_id, winning_ticket_id, status FROM raffles WHERE id=$1', [raffleId],
+    );
+    if (!raffleRows.length) {
+      return res.status(404).json({ error: 'Rifa no encontrada' });
+    }
+    if (raffleRows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
+    const { rows: ticketRows } = await client.query(
+      'SELECT id FROM raffle_tickets WHERE raffle_id=$1', [raffleId],
+    );
+    if (!ticketRows.length) {
+      return res.status(400).json({ error: 'No hay tickets para sortear' });
+    }
+
+    const result = await finalizeManualDraw(
+      client,
+      raffleId,
+      normalizedWinnerIds,
+      eliminated_ticket_ids,
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, ...result });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Manual-Draw] Error:', err);
+    res.status(500).json({ error: err.message || 'No se pudo finalizar el sorteo' });
+  } finally {
+    client.release();
+  }
+});
     const quantity = Math.max(1, parseInt(req.body.quantity || '1', 10));
     const { txId, buyer_name, buyer_email, amount_paid } = req.body;
 
@@ -466,13 +757,14 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
       const ticketNumber = String(startSequence + index).padStart(4, '0');
       const txSuffix = quantity > 1 ? `-${index + 1}` : '';
       const uniqueTxId = `${txId}${txSuffix}`;
+      const validationCode = createValidationCode(raffleId, ticketNumber);
 
       const { rows: insertedRows } = await client.query(
         `INSERT INTO raffle_tickets
            (raffle_id, ticket_number, buyer_name, buyer_email,
-            wompi_transaction_id, wompi_authorization_code, amount_paid, status)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'confirmed') RETURNING *`,
-        [raffleId, ticketNumber, buyer_name, buyer_email, uniqueTxId, null, raffle.ticket_price],
+            wompi_transaction_id, wompi_authorization_code, amount_paid, validation_code, status)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'confirmed') RETURNING *`,
+        [raffleId, ticketNumber, buyer_name, buyer_email, uniqueTxId, null, raffle.ticket_price, validationCode],
       );
       const ticket = insertedRows[0];
 
@@ -487,6 +779,7 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
         drawDate: raffle.draw_date,
         transactionId: uniqueTxId,
         purchasedAt: ticket.purchased_at,
+        validationCode,
       });
 
       await sendTicketEmail({
@@ -520,6 +813,13 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
     await client.query(
       'UPDATE raffles SET sold_tickets=sold_tickets+$1 WHERE id=$2', [quantity, raffleId],
     );
+
+    const { rows: raffleAfterRows } = await client.query(
+      'SELECT sold_tickets, total_tickets FROM raffles WHERE id=$1', [raffleId],
+    );
+    if (raffleAfterRows[0]?.sold_tickets >= raffleAfterRows[0]?.total_tickets) {
+      await selectAutomaticWinner(client, raffleId);
+    }
 
     await client.query('COMMIT');
     res.json({ success: true, tickets: createdTickets });

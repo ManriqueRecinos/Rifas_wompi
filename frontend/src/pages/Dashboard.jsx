@@ -189,6 +189,7 @@ function DashRaffleRow({ raffle }) {
         </div>
       </div>
       <div className="dash-row-actions">
+        <Link to={`/raffle/${raffle.id}/draw`} className="dash-draw-btn">🎲 Sorteo</Link>
         {raffle.wompi_url_enlace && (
           <a href={raffle.wompi_url_enlace} target="_blank" rel="noreferrer" className="dash-link-btn">
             🔗 Enlace Wompi

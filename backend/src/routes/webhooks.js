@@ -164,6 +164,24 @@ router.post('/wompi', async (req, res) => {
     );
     console.log('[Webhook] ✅ Contador sold_tickets actualizado');
 
+    const { rows: raffleAfterRows } = await pool.query(
+      'SELECT sold_tickets, total_tickets FROM raffles WHERE id=$1', [raffleId],
+    );
+    if (raffleAfterRows[0]?.sold_tickets >= raffleAfterRows[0]?.total_tickets) {
+      const { rows: ticketsRows } = await pool.query(
+        'SELECT id FROM raffle_tickets WHERE raffle_id=$1 ORDER BY id ASC', [raffleId],
+      );
+      if (ticketsRows.length) {
+        const winnerId = ticketsRows[require('crypto').randomInt(ticketsRows.length)].id;
+        await pool.query(
+          `UPDATE raffles
+              SET winning_ticket_id=$1, status='completed', updated_at=NOW()
+            WHERE id=$2`,
+          [winnerId, raffleId],
+        );
+      }
+    }
+
     // 9. Generar PDF del ticket
     let pdfBuffer;
     try {
@@ -178,6 +196,7 @@ router.post('/wompi', async (req, res) => {
         drawDate:          raffle.draw_date,
         transactionId:     txId,
         purchasedAt:       ticket.purchased_at,
+        validationCode:    ticket.validation_code,
       });
       console.log('[Webhook] ✅ PDF generado correctamente');
     } catch (pdfErr) {

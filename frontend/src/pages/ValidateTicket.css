@@ -1,0 +1,114 @@
+.validate-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: radial-gradient(circle at top, rgba(232, 200, 64, 0.14), transparent 35%), var(--bg);
+}
+
+.validate-card {
+  width: min(620px, 100%);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 32px;
+  text-align: center;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.35);
+}
+
+.validate-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 18px;
+  font-size: 34px;
+}
+
+.validate-icon.valid { background: rgba(34, 197, 94, 0.14); color: #4ade80; }
+.validate-icon.winner { background: rgba(232, 200, 64, 0.18); color: #e8c840; }
+.validate-icon.invalid { background: rgba(239, 68, 68, 0.14); color: #f87171; }
+
+.validate-card h1 {
+  margin: 0;
+  font-size: 34px;
+  color: var(--text);
+}
+
+.validate-subtitle {
+  color: var(--text2);
+  margin: 12px auto 0;
+  max-width: 480px;
+  line-height: 1.7;
+}
+
+.validate-grid {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  text-align: left;
+}
+
+.validate-grid div {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.validate-grid span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+
+.validate-grid strong {
+  color: var(--text);
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.validate-note {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(232, 200, 64, 0.08);
+  border: 1px solid rgba(232, 200, 64, 0.2);
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+.validate-btn {
+  display: inline-block;
+  margin-top: 24px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #111;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.validate-spinner {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+  margin: 0 auto 18px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .validate-card { padding: 22px; }
+  .validate-grid { grid-template-columns: 1fr; }
+}

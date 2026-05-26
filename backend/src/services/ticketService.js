@@ -1,6 +1,8 @@
 const puppeteer = require('puppeteer');
 const path      = require('path');
 const fs        = require('fs');
+const QRCode    = require('qrcode');
+require('dotenv').config();
 
 /**
  * Genera un PDF del ticket de rifa y lo guarda como buffer.
@@ -10,10 +12,17 @@ async function generateTicketPDF(ticketData) {
     ticketNumber, buyerName, buyerEmail,
     raffleTitle, raffleDescription, raffleImage,
     ticketPrice, drawDate, transactionId, purchasedAt,
+    validationCode,
   } = ticketData;
 
   const drawStr    = drawDate ? new Date(drawDate).toLocaleDateString('es-SV', { dateStyle: 'full' }) : 'Por definir';
   const purchaseStr = new Date(purchasedAt).toLocaleString('es-SV');
+  const validationUrl = validationCode
+    ? `${process.env.FRONTEND_URL || 'http://localhost:5173'}/validate/${validationCode}`
+    : null;
+  const qrCodeDataUrl = validationUrl
+    ? await QRCode.toDataURL(validationUrl, { errorCorrectionLevel: 'M', margin: 1, scale: 6 })
+    : null;
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -75,7 +84,11 @@ async function generateTicketPDF(ticketData) {
     display:flex;align-items:center;justify-content:space-between;
     padding-top:12px;border-top:1px solid #222;
   }
-  .tx-id{font-size:8px;color:#444;font-family:monospace;}
+  .validation-block{display:flex;flex-direction:column;gap:4px;max-width:220px;}
+  .tx-id{font-size:8px;color:#444;font-family:monospace;word-break:break-all;}
+  .validation-qr{display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .validation-qr img{width:54px;height:54px;border-radius:6px;background:#fff;padding:2px;}
+  .validation-qr span{font-size:8px;color:#666;letter-spacing:1px;}
   .badge{
     background:#e8c840;color:#0a0a0a;
     font-size:9px;font-weight:700;letter-spacing:1px;
@@ -121,7 +134,15 @@ async function generateTicketPDF(ticketData) {
       </div>
     </div>
     <div class="footer">
-      <div class="tx-id">TX: ${transactionId}</div>
+      <div class="validation-block">
+        <div class="tx-id">Validación: ${validationCode || 'N/A'}</div>
+        <div class="tx-id">TX: ${transactionId}</div>
+      </div>
+      ${qrCodeDataUrl ? `
+      <div class="validation-qr">
+        <img src="${qrCodeDataUrl}" alt="QR de validación" />
+        <span>ESCANEAR</span>
+      </div>` : ''}
       <div class="badge">✓ PAGO CONFIRMADO</div>
     </div>
   </div>
