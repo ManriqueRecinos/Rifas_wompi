@@ -99,3 +99,13 @@
 }
 .empty-state span { font-size: 48px; display: block; margin-bottom: 16px; }
 .empty-state p { font-size: 16px; }
+
+@media (max-width: 768px) {
+  .hero { padding: 56px 0 36px; }
+  .hero-title { font-size: clamp(40px, 16vw, 60px); }
+  .hero-sub { font-size: 15px; }
+  .raffles-section { padding: 36px 0 56px; }
+  .section-header { align-items: flex-start; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .raffles-grid, .loading-grid { grid-template-columns: 1fr; gap: 16px; }
+  .skeleton-card { height: 280px; }
+}

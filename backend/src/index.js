@@ -4,6 +4,7 @@ const cors     = require('cors');
 const path     = require('path');
 
 const app = express();
+const HOST = process.env.HOST || '0.0.0.0';
 
 // ── Middlewares ────────────────────────────────────────────────
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
@@ -22,6 +23,6 @@ app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 app.use((_, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
 const PORT = parseInt(process.env.PORT) || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Backend corriendo en http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Backend corriendo en http://10.10.15.6:${PORT}`);
 });

@@ -86,3 +86,13 @@ textarea { resize:vertical; min-height:100px; }
   line-height:1.6;
 }
 .create-info-note strong { color:var(--text2); }
+
+@media (max-width: 768px) {
+  .create-page { padding: 24px 0 56px; }
+  .create-title { font-size: 32px; }
+  .create-grid { gap: 20px; }
+  .form-row { grid-template-columns: 1fr; }
+  .estimate-box { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .create-btn { font-size: 18px; padding: 14px 16px; }
+  .create-info { position: static; padding: 18px; }
+}

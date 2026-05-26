@@ -13,6 +13,11 @@
   gap: 10px;
   text-decoration: none;
 }
+.navbar-shell {
+  justify-content: space-between;
+  height: 64px;
+  position: relative;
+}
 .logo-icon { font-size: 22px; }
 .logo-text {
   font-family: 'Bebas Neue', sans-serif;
@@ -51,3 +56,88 @@
 
 .nav-logout { color: var(--text3); }
 .nav-logout:hover { color: var(--danger); }
+
+.nav-burger {
+  display: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg2);
+  padding: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nav-burger span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 99px;
+  background: var(--text);
+  transition: transform .2s ease, opacity .2s ease;
+}
+
+.nav-burger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-burger.open span:nth-child(2) { opacity: 0; }
+.nav-burger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.nav-mobile-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 16px;
+  right: 16px;
+  background: rgba(12, 12, 20, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.nav-mobile-item {
+  width: 100%;
+  text-align: left;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 14px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.nav-mobile-item.accent {
+  background: var(--accent);
+  border-color: transparent;
+  color: #0a0a0a;
+}
+
+.nav-mobile-item.danger {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+@media (max-width: 768px) {
+  .navbar-shell {
+    height: auto;
+    min-height: 60px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    gap: 12px;
+  }
+
+  .navbar-logo { min-width: 0; }
+
+  .navbar-links { display: none; }
+
+  .nav-burger { display: inline-flex; margin-left: auto; }
+
+  .nav-mobile-panel {
+    display: grid;
+  }
+}

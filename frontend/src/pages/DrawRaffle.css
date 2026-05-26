@@ -43,3 +43,15 @@
 .winner-focus { background:linear-gradient(180deg, rgba(232,200,64,.12), rgba(255,255,255,.03)); }
 .winner-focus strong { display:block; font-family:'Bebas Neue',sans-serif; font-size:48px; color:var(--accent); letter-spacing:1px; }
 .winner-focus p { color:var(--text2); margin-top:8px; }
+
+@media (max-width: 768px) {
+	.draw-page { padding: 24px 0 56px; }
+	.draw-header { align-items: flex-start; }
+	.draw-title { font-size: 34px; }
+	.draw-layout { gap: 16px; }
+	.draw-wheel-wrap { min-height: 460px; }
+	.draw-wheel { width: 280px; height: 280px; }
+	.draw-center-card { width: 130px; height: 130px; padding: 12px; }
+	.draw-center-card strong { font-size: 20px; }
+	.draw-side { gap: 12px; }
+}

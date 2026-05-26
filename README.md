@@ -40,7 +40,7 @@ SMTP_PASS=tu_app_password_gmail
 
 ```bash
 npm run dev
-# Backend en http://localhost:3001
+# Backend en http://10.10.15.6:3001
 ```
 
 ---
@@ -51,7 +51,7 @@ npm run dev
 cd frontend
 npm install
 npm run dev
-# Frontend en http://localhost:5173
+# Frontend en http://10.10.15.6:5173
 ```
 
 ---
@@ -66,7 +66,7 @@ En desarrollo local, usa **ngrok**:
 ngrok http 3001
 ```
 
-Copia la URL HTTPS que te da (ej: `https://abc123.ngrok.io`) y agrégala al `.env`:
+Copia la URL HTTPS que te da (ej: `https://abc123.ngrok.io`) y agrégala al `.env` como `BACKEND_URL`:
 
 ```env
 BACKEND_URL=https://abc123.ngrok.io

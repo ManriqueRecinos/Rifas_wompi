@@ -18,7 +18,7 @@ async function generateTicketPDF(ticketData) {
   const drawStr    = drawDate ? new Date(drawDate).toLocaleDateString('es-SV', { dateStyle: 'full' }) : 'Por definir';
   const purchaseStr = new Date(purchasedAt).toLocaleString('es-SV');
   const validationUrl = validationCode
-    ? `${process.env.FRONTEND_URL || 'http://localhost:5173'}/validate/${validationCode}`
+    ? `${process.env.FRONTEND_URL || 'http://10.10.15.6:5173'}/validate/${validationCode}`
     : null;
   const qrCodeDataUrl = validationUrl
     ? await QRCode.toDataURL(validationUrl, { errorCorrectionLevel: 'M', margin: 1, scale: 6 })

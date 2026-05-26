@@ -208,3 +208,16 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+@media (max-width: 768px) {
+  .dashboard { padding: 24px 0 56px; }
+  .dash-header { align-items: flex-start; }
+  .dash-header-actions { width: 100%; }
+  .dash-header-actions > * { flex: 1 1 100%; text-align: center; }
+  .dash-stats { grid-template-columns: 1fr; }
+  .dash-row { grid-template-columns: 48px 1fr; }
+  .dash-row-actions { grid-column: 1 / -1; flex-wrap: wrap; }
+  .wompi-config-card { padding: 18px; }
+  .wompi-config-header { align-items: flex-start; }
+  .wompi-form-row { grid-template-columns: 1fr; }
+}

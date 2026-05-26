@@ -51,8 +51,8 @@ async function createPaymentLink(raffle, userCredentials) {
   const secret = userCredentials?.secret;
   const token  = await getAccessToken(appId, secret);
 
-  const backendUrl  = process.env.BACKEND_URL  || 'http://localhost:3001';
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const backendUrl  = process.env.BACKEND_URL  || 'http://10.10.15.6:3001';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://10.10.15.6:5173';
 
   const body = {
     identificadorEnlaceComercio: `RIFA-${raffle.id}`,

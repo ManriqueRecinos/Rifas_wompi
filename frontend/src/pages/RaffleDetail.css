@@ -230,3 +230,15 @@
   from { transform: scale(0.95); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+
+@media (max-width: 768px) {
+  .detail-page { padding: 24px 0 56px; }
+  .detail-grid { gap: 24px; }
+  .detail-stats { grid-template-columns: 1fr; }
+  .buy-btn { font-size: 18px; padding: 16px 18px; letter-spacing: 1px; }
+  .purchase-modal { width: calc(100% - 24px); padding: 18px; }
+  .modal-footer { flex-direction: column; }
+  .modal-footer > div { flex-direction: column !important; }
+  .owner-tickets-section { display: none; }
+  .qr-img { width: 120px; }
+}
