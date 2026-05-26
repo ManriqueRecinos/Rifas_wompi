@@ -16,8 +16,15 @@ cloudinary.config({
  */
 async function uploadBuffer(buffer, folder, publicId) {
   return new Promise((resolve, reject) => {
+    // Para subir documentos como PDF sin que Cloudinary de error por formato de imagen,
+    // usamos resource_type: 'raw' pero nos aseguramos de que el publicId termine en '.pdf'.
+    // Esto hace que la URL generada termine en '.pdf' y el navegador lo reconozca inmediatamente.
     const stream = cloudinary.uploader.upload_stream(
-      { folder, public_id: publicId, resource_type: 'raw' },
+      { 
+        folder, 
+        public_id: publicId.endsWith('.pdf') ? publicId : `${publicId}.pdf`, 
+        resource_type: 'raw' 
+      },
       (err, result) => {
         if (err) reject(err);
         else resolve(result.secure_url);

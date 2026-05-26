@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import './CreateRaffle.css';
 
 export default function CreateRaffle() {
+  const { user } = useAuth();
   const nav = useNavigate();
   const [form, setF] = useState({
     title: '', description: '', ticket_price: '',
@@ -44,6 +46,12 @@ export default function CreateRaffle() {
         <h1 className="create-title">Nueva Rifa</h1>
         <p className="create-sub">Completa los datos. Se creará automáticamente el enlace de pago en Wompi.</p>
       </div>
+
+      {!user?.wompi_configured && (
+        <div className="create-info-note" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', padding: '16px', borderRadius: '8px', marginBottom: '24px' }}>
+          ⚠️ <strong>Atención:</strong> No has vinculado tu cuenta de Wompi aún. Las rifas que crees usarán el enlace de pago global por defecto. Vincula tu cuenta en el <Link to="/dashboard" style={{ color: 'var(--accent)', textDecoration: 'underline', fontWeight: 'bold' }}>Dashboard</Link> para recibir pagos directamente en tu cuenta de Wompi.
+        </div>
+      )}
 
       {error && <div className="create-error">{error}</div>}
 

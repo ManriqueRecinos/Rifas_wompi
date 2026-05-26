@@ -110,3 +110,123 @@
   text-align:center; font-size:12px; color:var(--text3);
 }
 .wompi-note a { color:var(--accent); text-decoration:underline; }
+
+/* ── Modal de Compra ── */
+.purchase-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(4, 4, 8, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.purchase-modal {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 90%;
+  max-width: 480px;
+  padding: 24px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.modal-header h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 24px;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 18px;
+  transition: color 0.2s;
+}
+.close-btn:hover { color: var(--danger); }
+
+.modal-desc {
+  color: var(--text2);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.input-group {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.cancel-modal-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  transition: background 0.2s, color 0.2s;
+}
+.cancel-modal-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.confirm-modal-btn {
+  background: var(--accent);
+  border: none;
+  color: #0a0a0a;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(232,200,64,0.15);
+  transition: background 0.2s, transform 0.15s;
+}
+.confirm-modal-btn:hover {
+  background: var(--accent2);
+  transform: translateY(-1px);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}

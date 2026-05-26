@@ -30,6 +30,9 @@ export default function Dashboard() {
         <Link to="/create" className="dash-create-btn">+ Nueva Rifa</Link>
       </div>
 
+      {/* Wompi Connection Card */}
+      <WompiConfigCard />
+
       {/* Stats */}
       <div className="dash-stats">
         <div className="dash-stat">
@@ -59,6 +62,103 @@ export default function Dashboard() {
         <div className="dash-list">
           {raffles.map(r => <DashRaffleRow key={r.id} raffle={r} />)}
         </div>
+      )}
+    </div>
+  );
+}
+
+function WompiConfigCard() {
+  const { user, refreshUser } = useAuth();
+  const [appId, setAppId] = useState(user?.wompi_app_id || '');
+  const [secret, setSecret] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [showForm, setShowForm] = useState(!user?.wompi_configured);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccess(''); setLoading(true);
+    try {
+      await api.put('/auth/wompi-config', { wompi_app_id: appId, wompi_secret: secret });
+      setSuccess('¡Cuenta de Wompi vinculada y verificada con éxito!');
+      setSecret('');
+      await refreshUser();
+      setShowForm(false);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al conectar con Wompi');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="wompi-config-card">
+      <div className="wompi-config-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '24px' }}>🏦</span>
+          <div>
+            <h3 className="wompi-config-title">Pasarela de Pagos Wompi</h3>
+            <p className="wompi-config-sub">
+              {user?.wompi_configured 
+                ? 'Conectada y lista para recibir pagos de tus rifas' 
+                : 'Configura tus credenciales para recibir pagos directos'
+              }
+            </p>
+          </div>
+        </div>
+        <div>
+          <span className={`wompi-status-badge ${user?.wompi_configured ? 'active' : 'inactive'}`}>
+            {user?.wompi_configured ? '● Conectada' : '● Sin configurar'}
+          </span>
+          {user?.wompi_configured && (
+            <button 
+              onClick={() => setShowForm(!showForm)} 
+              className="wompi-edit-btn"
+            >
+              {showForm ? 'Cancelar' : 'Editar'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSave} className="wompi-config-form">
+          <div className="wompi-hint" style={{ marginTop: '0', marginBottom: '16px' }}>
+            Para recibir el dinero de las rifas directamente en tu cuenta de Wompi (Banco Agrícola El Salvador), introduce tus credenciales del ambiente en producción o sandbox. 
+            Las encuentras en <a href="https://wompi.sv" target="_blank" rel="noreferrer">wompi.sv</a> &gt; Desarrolladores.
+          </div>
+
+          {error && <div className="auth-error" style={{ marginBottom: '16px' }}>{error}</div>}
+          {success && <div className="wompi-success" style={{ marginBottom: '16px', color: '#4ade80', fontSize: '13px', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', padding: '10px', borderRadius: '8px' }}>{success}</div>}
+
+          <div className="wompi-form-row">
+            <div className="form-group">
+              <label>App ID (Client ID)</label>
+              <input 
+                type="text" 
+                placeholder="71897286-a920-4f0b-..." 
+                value={appId}
+                onChange={e => setAppId(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Client Secret (Secret Key)</label>
+              <input 
+                type="password" 
+                placeholder={user?.wompi_configured ? '••••••••••••••••••••' : 'f592ffa3-1b6c-...'}
+                value={secret}
+                onChange={e => setSecret(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button type="submit" className="wompi-save-btn" disabled={loading}>
+            {loading ? 'Verificando con Wompi...' : 'Validar y Guardar Credenciales'}
+          </button>
+        </form>
       )}
     </div>
   );

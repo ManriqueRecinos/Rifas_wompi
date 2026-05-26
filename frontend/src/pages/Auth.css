@@ -36,3 +36,49 @@
 
 .auth-footer { text-align:center; font-size:13px; color:var(--text3); margin-top:20px; }
 .auth-footer a { color:var(--accent); font-weight:600; }
+
+/* Wompi Section */
+.wompi-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  padding: 12px;
+  margin-top: 4px;
+}
+.wompi-toggle {
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.wompi-optional {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: normal;
+}
+.wompi-fields {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.wompi-hint {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.wompi-hint a {
+  color: var(--accent);
+  text-decoration: underline;
+}

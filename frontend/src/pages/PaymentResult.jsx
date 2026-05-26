@@ -1,20 +1,64 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import api from '../services/api';
 import './PaymentResult.css';
 
 export default function PaymentResult() {
   const [params] = useSearchParams();
   const [status, setStatus] = useState('loading'); // loading | success | failed
+  const [message, setMessage] = useState('Verificando tu pago...');
 
   useEffect(() => {
-    // Wompi redirige con parámetros en la URL
     const esAprobada = params.get('esAprobada');
-    const idTx       = params.get('idTransaccion');
+    const idTx = params.get('idTransaccion');
+    const raffleId = params.get('raffleId');
+    const finalizedKey = idTx ? `wompi_finalized_${idTx}` : null;
+
+    if (finalizedKey && sessionStorage.getItem(finalizedKey)) {
+      setStatus('success');
+      setMessage('Tu ticket ya fue confirmado.');
+      return;
+    }
+
+    if (esAprobada === 'false') {
+      setStatus('failed');
+      return;
+    }
 
     if (esAprobada === 'true' || idTx) {
-      setStatus('success');
-    } else if (esAprobada === 'false') {
-      setStatus('failed');
+      const pendingKey = raffleId ? `pending_purchase_${raffleId}` : null;
+      let pendingData = null;
+
+      try {
+        const pendingRaw = pendingKey ? localStorage.getItem(pendingKey) : null;
+        pendingData = pendingRaw ? JSON.parse(pendingRaw) : null;
+      } catch {
+        pendingData = null;
+      }
+
+      if (!raffleId || !idTx || !pendingData?.buyerName || !pendingData?.buyerEmail) {
+        setStatus('failed');
+        setMessage('No pudimos recuperar los datos del comprador para finalizar el ticket.');
+        return;
+      }
+
+      setMessage('Confirmando tu ticket y enviando el correo...');
+
+      api.post(`/raffles/${raffleId}/confirm-wompi-purchase`, {
+        txId: idTx,
+        buyer_name: pendingData.buyerName,
+        buyer_email: pendingData.buyerEmail,
+        amount_paid: params.get('monto') || null,
+      })
+        .then(() => {
+          localStorage.removeItem(pendingKey);
+          sessionStorage.setItem(`wompi_finalized_${idTx}`, '1');
+          setStatus('success');
+        })
+        .catch((err) => {
+          setStatus('failed');
+          setMessage(err.response?.data?.error || 'No se pudo confirmar el ticket.');
+        });
     } else {
       setStatus('unknown');
     }
@@ -29,7 +73,7 @@ export default function PaymentResult() {
         {status === 'loading' && (
           <div className="result-loading">
             <div className="result-spinner" />
-            <p>Verificando tu pago...</p>
+            <p>{message}</p>
           </div>
         )}
 

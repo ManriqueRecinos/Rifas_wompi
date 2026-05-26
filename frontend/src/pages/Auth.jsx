@@ -53,14 +53,22 @@ export function Login() {
 export function Register() {
   const { register } = useAuth();
   const nav           = useNavigate();
-  const [form, setF]  = useState({ name: '', email: '', password: '' });
-  const [err,  setE]  = useState('');
-  const [busy, setB]  = useState(false);
+  const [form, setF]  = useState({
+    name: '', email: '', password: '',
+    wompi_app_id: '', wompi_secret: '',
+  });
+  const [err,  setE]       = useState('');
+  const [busy, setB]       = useState(false);
+  const [showWompi, setShowWompi] = useState(false);
 
   const handle = async (e) => {
     e.preventDefault(); setE(''); setB(true);
     try {
-      await register(form.name, form.email, form.password);
+      await register(
+        form.name, form.email, form.password,
+        form.wompi_app_id || undefined,
+        form.wompi_secret || undefined,
+      );
       nav('/dashboard');
     } catch (ex) {
       setE(ex.response?.data?.error || 'Error al registrarse');
@@ -89,6 +97,45 @@ export function Register() {
             <input type="password" value={form.password} minLength={6}
               onChange={e => setF(f => ({...f, password: e.target.value}))} required />
           </label>
+
+          {/* Sección de Wompi colapsable */}
+          <div className="wompi-section">
+            <button
+              type="button"
+              className="wompi-toggle"
+              onClick={() => setShowWompi(!showWompi)}
+            >
+              <span>{showWompi ? '▾' : '▸'}</span>
+              <span>🏦 Vincular cuenta de Wompi</span>
+              <span className="wompi-optional">(opcional)</span>
+            </button>
+
+            {showWompi && (
+              <div className="wompi-fields">
+                <p className="wompi-hint">
+                  Ingresa tus credenciales de Wompi para que los pagos de tus rifas lleguen directamente a tu cuenta.
+                  Las puedes encontrar en tu <a href="https://wompi.sv" target="_blank" rel="noreferrer">panel de Wompi</a>.
+                </p>
+                <label>App ID (Client ID)
+                  <input
+                    type="text"
+                    placeholder="Ej: 71897286-a920-4f0b-..."
+                    value={form.wompi_app_id}
+                    onChange={e => setF(f => ({...f, wompi_app_id: e.target.value}))}
+                  />
+                </label>
+                <label>Secret (Client Secret)
+                  <input
+                    type="password"
+                    placeholder="Ej: f592ffa3-1b6c-..."
+                    value={form.wompi_secret}
+                    onChange={e => setF(f => ({...f, wompi_secret: e.target.value}))}
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+
           <button type="submit" className="auth-btn" disabled={busy}>
             {busy ? 'Creando cuenta...' : 'Crear cuenta'}
           </button>

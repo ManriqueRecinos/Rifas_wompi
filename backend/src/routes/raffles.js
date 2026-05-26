@@ -81,10 +81,20 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
     );
     const raffle = rows[0];
 
+    // Obtener credenciales Wompi del usuario (si tiene configuradas)
+    const { rows: userRows } = await client.query(
+      'SELECT wompi_app_id, wompi_secret, wompi_validated FROM users WHERE id=$1',
+      [req.user.id],
+    );
+    const userData = userRows[0];
+    const userCredentials = (userData?.wompi_app_id && userData?.wompi_secret)
+      ? { appId: userData.wompi_app_id, secret: userData.wompi_secret }
+      : null; // Usará las credenciales globales del .env
+
     // Crear enlace de pago en Wompi
     let wompiData = {};
     try {
-      wompiData = await wompi.createPaymentLink(raffle);
+      wompiData = await wompi.createPaymentLink(raffle, userCredentials);
       await client.query(
         `UPDATE raffles SET wompi_enlace_id=$1, wompi_url_enlace=$2, wompi_url_qr=$3, status='active'
          WHERE id=$4`,
@@ -129,6 +139,318 @@ router.get('/:id/tickets', auth, async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener tickets' });
+  }
+});
+
+// ── Obtener tickets comprados por el usuario autenticado ───────
+router.get('/purchases/mine', auth, async (req, res) => {
+  try {
+    // Buscamos tickets en los que el correo coincida con el email del usuario autenticado
+    const { rows } = await pool.query(
+      `SELECT t.*, r.title AS raffle_title, r.draw_date, r.image_url AS raffle_image, u.name AS organizer_name
+       FROM raffle_tickets t
+       JOIN raffles r ON t.raffle_id = r.id
+       JOIN users u ON r.user_id = u.id
+       WHERE t.buyer_email = $1
+       ORDER BY t.purchased_at DESC`,
+      [req.user.email]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener tus tickets comprados' });
+  }
+});
+
+// ── Reenviar ticket por correo electrónico ──────────────────────
+router.post('/tickets/:ticketId/resend', auth, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    // Obtener datos del ticket y la rifa asociada
+    const { rows } = await pool.query(
+      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description, r.image_url AS raffle_image, r.ticket_price, r.draw_date
+       FROM raffle_tickets t
+       JOIN raffles r ON t.raffle_id = r.id
+       WHERE t.id = $1`,
+      [ticketId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = rows[0];
+
+    // Verificar si el usuario tiene permiso (debe ser el comprador o el dueño de la rifa)
+    const { rows: raffleOwner } = await pool.query(
+      'SELECT user_id FROM raffles WHERE id = $1', [ticket.raffle_id]
+    );
+    
+    const isBuyer = ticket.buyer_email === req.user.email;
+    const isOwner = raffleOwner.length && raffleOwner[0].user_id === req.user.id;
+
+    if (!isBuyer && !isOwner) {
+      return res.status(403).json({ error: 'No tienes permiso para reenviar este ticket' });
+    }
+
+    // Volver a generar el buffer PDF con Puppeteer
+    const { generateTicketPDF } = require('../services/ticketService');
+    const { sendTicketEmail } = require('../services/emailService');
+
+    const pdfBuffer = await generateTicketPDF({
+      ticketNumber:      ticket.ticket_number,
+      buyerName:         ticket.buyer_name || 'Comprador',
+      buyerEmail:        ticket.buyer_email || '',
+      raffleTitle:       ticket.raffle_title,
+      raffleDescription: ticket.raffle_description,
+      raffleImage:       ticket.raffle_image,
+      ticketPrice:       ticket.ticket_price,
+      drawDate:          ticket.draw_date,
+      transactionId:     ticket.wompi_transaction_id || 'EFECTIVO',
+      purchasedAt:       ticket.purchased_at,
+    });
+
+    // Enviar correo
+    await sendTicketEmail({
+      to:           ticket.buyer_email,
+      buyerName:    ticket.buyer_name || 'Comprador',
+      buyerEmail:   ticket.buyer_email || '',
+      raffleTitle:  ticket.raffle_title,
+      ticketNumber: ticket.ticket_number,
+      pdfBuffer,
+    });
+
+    res.json({ success: true, message: '✉️ Ticket reenviado correctamente al correo del comprador' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al reenviar el ticket por correo' });
+  }
+});
+
+// ── Compra manual / Pago contra entrega (Efectivo) ─────────────
+router.post('/:id/cash-purchase', auth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { buyer_name, buyer_email } = req.body;
+    if (!buyer_name || !buyer_email) {
+      return res.status(400).json({ error: 'buyer_name y buyer_email son requeridos' });
+    }
+
+    // 1. Obtener y verificar que la rifa pertenezca al usuario autenticado
+    const { rows: raffleRows } = await client.query(
+      'SELECT * FROM raffles WHERE id=$1', [req.params.id],
+    );
+    if (!raffleRows.length) {
+      return res.status(404).json({ error: 'Rifa no encontrada' });
+    }
+    const raffle = raffleRows[0];
+    if (raffle.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para registrar pagos en esta rifa' });
+    }
+
+    // 2. Verificar disponibilidad de tickets
+    if (raffle.sold_tickets >= raffle.total_tickets) {
+      return res.status(400).json({ error: 'La rifa ya está agotada' });
+    }
+
+    // 3. Generar número de ticket correlativo
+    const { rows: cntRows } = await client.query(
+      `SELECT COUNT(*) AS cnt FROM raffle_tickets WHERE raffle_id=$1`, [raffle.id],
+    );
+    const seq = parseInt(cntRows[0].cnt) + 1;
+    const ticketNumber = String(seq).padStart(4, '0');
+
+    // 4. Crear código de transacción falso/representativo para efectivo
+    const txId = `CASH-${raffle.id}-${ticketNumber}-${Date.now().toString().slice(-4)}`;
+
+    // 5. Registrar ticket en base de datos
+    const { rows: ticketRows } = await client.query(
+      `INSERT INTO raffle_tickets
+         (raffle_id, ticket_number, buyer_name, buyer_email,
+          wompi_transaction_id, wompi_authorization_code, amount_paid, status)
+       VALUES($1,$2,$3,$4,$5,'CASH_OK',$6,'confirmed') RETURNING *`,
+      [raffle.id, ticketNumber, buyer_name, buyer_email, txId, raffle.ticket_price],
+    );
+    const ticket = ticketRows[0];
+
+    // 6. Actualizar contador de vendidos
+    await client.query(
+      'UPDATE raffles SET sold_tickets=sold_tickets+1 WHERE id=$1', [raffle.id],
+    );
+
+    // 7. Generar e iniciar envío de ticket por correo en segundo plano
+    const { generateTicketPDF } = require('../services/ticketService');
+    const { uploadBuffer } = require('../services/cloudinaryService');
+    const { sendTicketEmail } = require('../services/emailService');
+
+    let pdfBuffer;
+    try {
+      pdfBuffer = await generateTicketPDF({
+        ticketNumber,
+        buyerName: buyer_name,
+        buyerEmail: buyer_email,
+        raffleTitle: raffle.title,
+        raffleDescription: raffle.description,
+        raffleImage: raffle.image_url,
+        ticketPrice: raffle.ticket_price,
+        drawDate: raffle.draw_date,
+        transactionId: txId,
+        purchasedAt: ticket.purchased_at,
+      });
+    } catch (pdfErr) {
+      console.error('[Cash-Purchase] Error generating PDF:', pdfErr.message);
+    }
+
+    if (pdfBuffer) {
+      try {
+        const pdfUrl = await uploadBuffer(
+          pdfBuffer,
+          'rifas/tickets',
+          `ticket-${raffle.id}-${ticketNumber}.pdf`,
+        );
+        await client.query(
+          'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
+        );
+      } catch (uploadErr) {
+        console.error('[Cash-Purchase] Error uploading PDF:', uploadErr.message);
+      }
+
+      try {
+        await sendTicketEmail({
+          to: buyer_email,
+          buyerName: buyer_name,
+          buyerEmail: buyer_email,
+          raffleTitle: raffle.title,
+          ticketNumber,
+          pdfBuffer,
+        });
+      } catch (emailErr) {
+        console.error('[Cash-Purchase] Error sending email:', emailErr.message);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, ticket });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Error al procesar el pago en efectivo' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Confirmar compra Wompi desde el redirect del navegador ─────
+router.post('/:id/confirm-wompi-purchase', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const raffleId = parseInt(req.params.id, 10);
+    const { txId, buyer_name, buyer_email, amount_paid } = req.body;
+
+    if (!raffleId || !txId || !buyer_name || !buyer_email) {
+      return res.status(400).json({ error: 'raffleId, txId, buyer_name y buyer_email son requeridos' });
+    }
+
+    const { rows: raffleRows } = await client.query(
+      'SELECT * FROM raffles WHERE id=$1', [raffleId],
+    );
+    if (!raffleRows.length) {
+      return res.status(404).json({ error: 'Rifa no encontrada' });
+    }
+    const raffle = raffleRows[0];
+
+    const { rows: existingRows } = await client.query(
+      'SELECT * FROM raffle_tickets WHERE wompi_transaction_id=$1', [txId],
+    );
+
+    let ticket;
+    let needsIncrement = false;
+
+    if (existingRows.length) {
+      ticket = existingRows[0];
+      await client.query(
+        `UPDATE raffle_tickets
+            SET buyer_name=$1,
+                buyer_email=$2,
+                amount_paid=COALESCE($3, amount_paid),
+                status='confirmed'
+          WHERE id=$4`,
+        [buyer_name, buyer_email, amount_paid, ticket.id],
+      );
+
+      const { rows: refreshedRows } = await client.query(
+        'SELECT * FROM raffle_tickets WHERE id=$1', [ticket.id],
+      );
+      ticket = refreshedRows[0];
+    } else {
+      const ticketNumber = await generateTicketNumber(raffleId);
+      const { rows: insertedRows } = await client.query(
+        `INSERT INTO raffle_tickets
+           (raffle_id, ticket_number, buyer_name, buyer_email,
+            wompi_transaction_id, wompi_authorization_code, amount_paid, status)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'confirmed') RETURNING *`,
+        [raffleId, ticketNumber, buyer_name, buyer_email, txId, null, amount_paid || raffle.ticket_price],
+      );
+      ticket = insertedRows[0];
+      needsIncrement = true;
+    }
+
+    if (needsIncrement) {
+      await client.query(
+        'UPDATE raffles SET sold_tickets=sold_tickets+1 WHERE id=$1', [raffleId],
+      );
+    }
+
+    const { generateTicketPDF } = require('../services/ticketService');
+    const { uploadBuffer } = require('../services/cloudinaryService');
+    const { sendTicketEmail } = require('../services/emailService');
+
+    const pdfBuffer = await generateTicketPDF({
+      ticketNumber: ticket.ticket_number,
+      buyerName: buyer_name,
+      buyerEmail: buyer_email,
+      raffleTitle: raffle.title,
+      raffleDescription: raffle.description,
+      raffleImage: raffle.image_url,
+      ticketPrice: raffle.ticket_price,
+      drawDate: raffle.draw_date,
+      transactionId: txId,
+      purchasedAt: ticket.purchased_at,
+    });
+
+    if (!ticket.ticket_pdf_url) {
+      const pdfUrl = await uploadBuffer(
+        pdfBuffer,
+        'rifas/tickets',
+        `ticket-${raffleId}-${ticket.ticket_number}.pdf`,
+      );
+      await client.query(
+        'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
+      );
+      ticket.ticket_pdf_url = pdfUrl;
+    }
+
+    await sendTicketEmail({
+      to: buyer_email,
+      buyerName: buyer_name,
+      buyerEmail: buyer_email,
+      raffleTitle: raffle.title,
+      ticketNumber: ticket.ticket_number,
+      pdfBuffer,
+    });
+
+    await client.query('COMMIT');
+    res.json({ success: true, ticket });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Wompi-Confirm] Error:', err);
+    res.status(500).json({ error: 'Error al confirmar el pago' });
+  } finally {
+    client.release();
   }
 });
 

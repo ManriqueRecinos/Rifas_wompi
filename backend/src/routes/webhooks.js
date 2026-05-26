@@ -5,13 +5,72 @@ const { uploadBuffer }    = require('../services/cloudinaryService');
 const { sendTicketEmail } = require('../services/emailService');
 const router              = express.Router();
 
+function normalizeBuyerName(name, email) {
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  if (cleanName) return cleanName;
+
+  const localPart = typeof email === 'string' && email.includes('@')
+    ? email.split('@')[0].trim()
+    : '';
+
+  if (!localPart) return 'Comprador';
+
+  return localPart
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getFirstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function extractBuyerData(payload) {
+  const clienteData = payload.cliente || payload.Cliente || payload.customer || payload.Customer || {};
+  const buyerEmail = getFirstString(
+    clienteData.EMail,
+    clienteData.Email,
+    clienteData.email,
+    clienteData.Correo,
+    clienteData.correo,
+    payload.EMail,
+    payload.Email,
+    payload.email,
+    payload.Correo,
+    payload.correo,
+  );
+
+  const buyerName = getFirstString(
+    clienteData.NombreCompleto,
+    clienteData.nombreCompleto,
+    clienteData.Nombre,
+    clienteData.nombre,
+    clienteData.Nombres,
+    clienteData.nombres,
+    payload.NombreCompleto,
+    payload.nombreCompleto,
+    payload.Nombre,
+    payload.nombre,
+  );
+
+  return {
+    buyerEmail,
+    buyerName: normalizeBuyerName(buyerName, buyerEmail),
+  };
+}
+
 // Genera número de ticket único para una rifa
 async function generateTicketNumber(raffleId) {
   const { rows } = await pool.query(
     `SELECT COUNT(*) AS cnt FROM raffle_tickets WHERE raffle_id=$1`, [raffleId],
   );
   const seq = parseInt(rows[0].cnt) + 1;
-  return String(seq).padStart(4, '0'); // Ej: 0001, 0042, 0500
+  return String(seq).padStart(4, '0');
 }
 
 // ── POST /api/webhooks/wompi ──────────────────────────────────
@@ -21,29 +80,41 @@ router.post('/wompi', async (req, res) => {
 
   try {
     const payload = req.body;
+    console.log('═══════════════════════════════════════════');
     console.log('[Webhook] Recibido:', JSON.stringify(payload, null, 2));
+    console.log('═══════════════════════════════════════════');
 
     // 1. Solo procesar pagos exitosos
     if (payload.ResultadoTransaccion !== 'ExitosaAprobada') {
-      console.log('[Webhook] Transacción no aprobada:', payload.ResultadoTransaccion);
+      console.log('[Webhook] ❌ Transacción no aprobada:', payload.ResultadoTransaccion);
       return;
     }
 
-    const txId       = payload.IdTransaccion;
-    const enlaceId   = payload.EnlacePago?.IdentificadorEnlaceComercio; // "RIFA-{id}"
-    const buyerEmail = payload.cliente?.Email;
-    const buyerName  = payload.cliente?.Nombre;
-    const monto      = payload.Monto;
-    const authCode   = payload.CodigoAutorizacion;
+    const txId     = payload.IdTransaccion;
+    const monto    = payload.Monto;
+    const authCode = payload.CodigoAutorizacion;
+
+    // Wompi puede enviar datos del cliente en distintas formas según modo sandbox/producción
+    const { buyerEmail, buyerName } = extractBuyerData(payload);
+
+    const enlacePago  = payload.EnlacePago || payload.enlacePago || {};
+    const enlaceId    = enlacePago.IdentificadorEnlaceComercio || enlacePago.identificadorEnlaceComercio;
+
+    console.log('[Webhook] Datos extraídos:');
+    console.log('  - txId:', txId);
+    console.log('  - buyerName:', buyerName);
+    console.log('  - buyerEmail:', buyerEmail);
+    console.log('  - enlaceId:', enlaceId);
+    console.log('  - monto:', monto);
 
     // 2. Extraer raffleId
     if (!enlaceId || !enlaceId.startsWith('RIFA-')) {
-      console.log('[Webhook] IdentificadorEnlaceComercio inválido:', enlaceId);
+      console.log('[Webhook] ❌ IdentificadorEnlaceComercio inválido:', enlaceId);
       return;
     }
     const raffleId = parseInt(enlaceId.replace('RIFA-', ''));
     if (isNaN(raffleId)) {
-      console.log('[Webhook] raffleId no numérico:', enlaceId);
+      console.log('[Webhook] ❌ raffleId no numérico:', enlaceId);
       return;
     }
 
@@ -52,7 +123,7 @@ router.post('/wompi', async (req, res) => {
       'SELECT id FROM raffle_tickets WHERE wompi_transaction_id=$1', [txId],
     );
     if (existing.length) {
-      console.log('[Webhook] Transacción ya procesada:', txId);
+      console.log('[Webhook] ⚠️ Transacción ya procesada:', txId);
       return;
     }
 
@@ -61,14 +132,14 @@ router.post('/wompi', async (req, res) => {
       'SELECT * FROM raffles WHERE id=$1', [raffleId],
     );
     if (!raffleRows.length) {
-      console.log('[Webhook] Rifa no encontrada:', raffleId);
+      console.log('[Webhook] ❌ Rifa no encontrada:', raffleId);
       return;
     }
     const raffle = raffleRows[0];
 
     // 5. Verificar que hay tickets disponibles
     if (raffle.sold_tickets >= raffle.total_tickets) {
-      console.log('[Webhook] Rifa agotada:', raffleId);
+      console.log('[Webhook] ❌ Rifa agotada:', raffleId);
       return;
     }
 
@@ -84,19 +155,22 @@ router.post('/wompi', async (req, res) => {
       [raffleId, ticketNumber, buyerName, buyerEmail, txId, authCode, monto],
     );
     const ticket = ticketRows[0];
+    const ticketBuyerName = normalizeBuyerName(ticket.buyer_name || buyerName, buyerEmail);
+    console.log('[Webhook] ✅ Ticket insertado en DB:', ticket.id, '- Número:', ticketNumber);
 
     // 8. Actualizar contador de tickets vendidos
     await pool.query(
       'UPDATE raffles SET sold_tickets=sold_tickets+1 WHERE id=$1', [raffleId],
     );
+    console.log('[Webhook] ✅ Contador sold_tickets actualizado');
 
     // 9. Generar PDF del ticket
     let pdfBuffer;
     try {
       pdfBuffer = await generateTicketPDF({
         ticketNumber,
-        buyerName,
-        buyerEmail,
+        buyerName: ticketBuyerName,
+        buyerEmail: buyerEmail || '',
         raffleTitle:       raffle.title,
         raffleDescription: raffle.description,
         raffleImage:       raffle.image_url,
@@ -105,47 +179,42 @@ router.post('/wompi', async (req, res) => {
         transactionId:     txId,
         purchasedAt:       ticket.purchased_at,
       });
+      console.log('[Webhook] ✅ PDF generado correctamente');
     } catch (pdfErr) {
-      console.error('[Webhook] Error generando PDF:', pdfErr.message);
+      console.error('[Webhook] ❌ Error generando PDF:', pdfErr.message);
     }
 
     // 10. Subir PDF a Cloudinary
     let pdfUrl = null;
     if (pdfBuffer) {
       try {
+        // Para subir como .pdf real a Cloudinary pasamos el public_id con la extensión .pdf
         pdfUrl = await uploadBuffer(
           pdfBuffer,
           'rifas/tickets',
-          `ticket-${raffleId}-${ticketNumber}`,
+          `ticket-${raffleId}-${ticketNumber}.pdf`,
         );
         await pool.query(
           'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
         );
+        console.log('[Webhook] ✅ PDF subido a Cloudinary:', pdfUrl);
       } catch (uploadErr) {
-        console.error('[Webhook] Error subiendo PDF:', uploadErr.message);
+        console.error('[Webhook] ❌ Error subiendo PDF:', uploadErr.message);
       }
     }
 
-    // 11. Enviar correo con ticket
-    if (buyerEmail && pdfBuffer) {
-      try {
-        await sendTicketEmail({
-          to:           buyerEmail,
-          buyerName,
-          raffleTitle:  raffle.title,
-          ticketNumber,
-          pdfBuffer,
-        });
-      } catch (emailErr) {
-        console.error('[Webhook] Error enviando correo:', emailErr.message);
-      }
+    // 11. El correo final se confirma desde el redirect del navegador,
+    // porque ahí recuperamos el nombre y correo que el comprador escribió.
+    if (!buyerEmail) {
+      console.log('[Webhook] ⚠️ Quedó pendiente el correo: Wompi no proporcionó email del comprador (modo sandbox)');
     }
 
-    console.log(`[Webhook] ✅ Ticket #${ticketNumber} confirmado para rifa ${raffleId} — comprador: ${buyerEmail}`);
+    console.log(`[Webhook] 🎉 COMPLETADO — Ticket #${ticketNumber} para rifa ${raffleId} (${raffle.title})`);
 
   } catch (err) {
-    console.error('[Webhook] Error general:', err);
+    console.error('[Webhook] ❌ Error general:', err);
   }
 });
 
 module.exports = router;
+

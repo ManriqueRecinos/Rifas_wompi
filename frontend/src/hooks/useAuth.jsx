@@ -23,8 +23,10 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const register = async (name, email, password) => {
-    const { data } = await api.post('/auth/register', { name, email, password });
+  const register = async (name, email, password, wompi_app_id, wompi_secret) => {
+    const { data } = await api.post('/auth/register', {
+      name, email, password, wompi_app_id, wompi_secret,
+    });
     localStorage.setItem('token', data.token);
     setUser(data.user);
     return data;
@@ -35,8 +37,13 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    const { data } = await api.get('/auth/me');
+    setUser(data);
+  };
+
   return (
-    <AuthCtx.Provider value={{ user, loading, login, register, logout }}>
+    <AuthCtx.Provider value={{ user, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthCtx.Provider>
   );
