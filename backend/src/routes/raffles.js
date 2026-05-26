@@ -96,7 +96,7 @@ router.post('/', auth, upload.any(), async (req, res) => {
     const { rows } = await client.query(
       `INSERT INTO raffles(user_id,title,description,image_url,image_urls,ticket_price,total_tickets,draw_date,status)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'draft') RETURNING *`,
-      [req.user.id, title, description, image_url, imageUrls, ticket_price, total_tickets, draw_date || null],
+      [req.user.id, title, description, image_url, JSON.stringify(imageUrls), ticket_price, total_tickets, draw_date || null],
     );
     const raffle = rows[0];
 
