@@ -1,11 +1,32 @@
 const express         = require('express');
 const multer          = require('multer');
+const fs              = require('fs/promises');
 const pool            = require('../db');
 const auth            = require('../middleware/auth');
 const wompi           = require('../services/wompiService');
 const { uploadImage } = require('../services/cloudinaryService');
 const router          = express.Router();
 const upload          = multer({ dest: '/tmp/' });
+
+function collectImageFiles(req) {
+  const files = Array.isArray(req.files) ? req.files : [];
+  return files.filter((file) => file.fieldname === 'images' || file.fieldname === 'image');
+}
+
+async function uploadImagesSequentially(files) {
+  const uploadedUrls = [];
+
+  for (const file of files) {
+    try {
+      const url = await uploadImage(file.path, 'rifas');
+      uploadedUrls.push(url);
+    } finally {
+      await fs.unlink(file.path).catch(() => {});
+    }
+  }
+
+  return uploadedUrls;
+}
 
 // ── Listar rifas públicas ────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -58,7 +79,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── Crear rifa + enlace Wompi ─────────────────────────────────
-router.post('/', auth, upload.single('image'), async (req, res) => {
+router.post('/', auth, upload.any(), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -67,17 +88,15 @@ router.post('/', auth, upload.single('image'), async (req, res) => {
     if (!title || !ticket_price || !total_tickets)
       return res.status(400).json({ error: 'title, ticket_price y total_tickets son requeridos' });
 
-    // Subir imagen si se adjuntó
-    let image_url = null;
-    if (req.file) {
-      image_url = await uploadImage(req.file.path, 'rifas');
-    }
+    const imageFiles = collectImageFiles(req);
+    const imageUrls = imageFiles.length ? await uploadImagesSequentially(imageFiles) : [];
+    const image_url = imageUrls[0] || null;
 
     // Insertar rifa en DB
     const { rows } = await client.query(
-      `INSERT INTO raffles(user_id,title,description,image_url,ticket_price,total_tickets,draw_date,status)
-       VALUES($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
-      [req.user.id, title, description, image_url, ticket_price, total_tickets, draw_date || null],
+      `INSERT INTO raffles(user_id,title,description,image_url,image_urls,ticket_price,total_tickets,draw_date,status)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'draft') RETURNING *`,
+      [req.user.id, title, description, image_url, imageUrls, ticket_price, total_tickets, draw_date || null],
     );
     const raffle = rows[0];
 

@@ -32,6 +32,29 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
+async function ensureRaffleImageColumns() {
+  try {
+    await pool.query(`
+      ALTER TABLE raffles
+      ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb
+    `);
+
+    await pool.query(`
+      UPDATE raffles
+         SET image_urls = CASE
+           WHEN image_url IS NULL OR image_url = '' THEN '[]'::jsonb
+           ELSE jsonb_build_array(image_url)
+         END
+       WHERE image_urls IS NULL
+          OR image_urls = '[]'::jsonb
+    `);
+  } catch (err) {
+    console.error('No se pudo preparar la columna image_urls en raffles:', err.message);
+  }
+}
+
+ensureRaffleImageColumns();
+
 pool.on('error', (err) => {
   console.error('Unexpected DB error', err);
 });

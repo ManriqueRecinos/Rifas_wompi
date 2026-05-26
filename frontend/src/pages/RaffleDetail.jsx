@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import ImageCarousel from '../components/ImageCarousel';
 import './RaffleDetail.css';
 
 export default function RaffleDetail() {
@@ -104,6 +105,11 @@ export default function RaffleDetail() {
   const pct       = Math.round((raffle.sold_tickets / raffle.total_tickets) * 100);
   const available = raffle.total_tickets - raffle.sold_tickets;
   const soldOut   = available === 0;
+  const raffleImages = Array.isArray(raffle.image_urls) && raffle.image_urls.length > 0
+    ? raffle.image_urls
+    : raffle.image_url
+      ? [raffle.image_url]
+      : [];
 
   // Función para enmascarar correo electrónico (ej: m***s@gmail.com)
   const maskEmail = (email) => {
@@ -131,8 +137,8 @@ export default function RaffleDetail() {
       <div className="detail-grid">
         {/* Imagen */}
         <div className="detail-img-wrap">
-          {raffle.image_url
-            ? <img src={raffle.image_url} alt={raffle.title} className="detail-img" />
+          {raffleImages.length > 0
+            ? <ImageCarousel images={raffleImages} alt={raffle.title} className="detail-carousel" />
             : <div className="detail-img-placeholder">🎁</div>
           }
           {raffle.wompi_url_qr && (

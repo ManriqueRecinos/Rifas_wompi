@@ -67,7 +67,7 @@ async function createPaymentLink(raffle, userCredentials) {
     },
     infoProducto: {
       descripcionProducto: raffle.description || raffle.title,
-      urlImagenProducto:   raffle.image_url || null,
+      urlImagenProducto:   (Array.isArray(raffle.image_urls) && raffle.image_urls[0]) || raffle.image_url || null,
     },
     configuracion: {
       urlRedirect:               `${frontendUrl}/payment/result?raffleId=${raffle.id}`,

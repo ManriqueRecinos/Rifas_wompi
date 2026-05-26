@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
+import ImageCarousel from '../components/ImageCarousel';
 import './CreateRaffle.css';
 
 export default function CreateRaffle() {
@@ -11,16 +12,27 @@ export default function CreateRaffle() {
     title: '', description: '', ticket_price: '',
     total_tickets: '', draw_date: '',
   });
-  const [image, setImage]  = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
+  useEffect(() => () => {
+    images.forEach((item) => URL.revokeObjectURL(item.preview));
+  }, [images]);
+
   const handleImg = (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    setImage(f);
-    setPreview(URL.createObjectURL(f));
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    setImages((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.preview));
+      return files.map((file) => ({
+        file,
+        preview: URL.createObjectURL(file),
+      }));
+    });
+
+    e.target.value = '';
   };
 
   const handleSubmit = async (e) => {
@@ -29,7 +41,7 @@ export default function CreateRaffle() {
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => v && fd.append(k, v));
-      if (image) fd.append('image', image);
+      images.forEach(({ file }) => fd.append('images', file));
 
       const { data } = await api.post('/raffles', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -92,14 +104,24 @@ export default function CreateRaffle() {
           <div className="form-group">
             <label>Imagen del premio</label>
             <div className="img-upload" onClick={() => document.getElementById('img-input').click()}>
-              {preview
-                ? <img src={preview} alt="preview" className="img-preview" />
-                : <div className="img-placeholder">
-                    <span>📷</span>
-                    <p>Haz clic para subir imagen</p>
-                  </div>
-              }
-              <input id="img-input" type="file" accept="image/*"
+              {images.length > 0 ? (
+                <div style={{ width: '100%' }}>
+                  <ImageCarousel
+                    images={images.map((item) => item.preview)}
+                    alt="Vista previa de la rifa"
+                    className="create-carousel"
+                  />
+                  <p style={{ marginTop: '12px', color: 'var(--text3)', fontSize: '13px' }}>
+                    {images.length} imagen{images.length > 1 ? 'es' : ''} seleccionada{images.length > 1 ? 's' : ''} en orden de carga.
+                  </p>
+                </div>
+              ) : (
+                <div className="img-placeholder">
+                  <span>📷</span>
+                  <p>Haz clic para subir imágenes</p>
+                </div>
+              )}
+              <input id="img-input" type="file" accept="image/*" multiple
                 onChange={handleImg} style={{display:'none'}} />
             </div>
           </div>

@@ -167,12 +167,15 @@ function WompiConfigCard() {
 function DashRaffleRow({ raffle }) {
   const pct     = Math.round((raffle.sold_tickets / raffle.total_tickets) * 100);
   const revenue = (raffle.sold_tickets * parseFloat(raffle.ticket_price)).toFixed(2);
+  const coverImage = Array.isArray(raffle.image_urls) && raffle.image_urls.length > 0
+    ? raffle.image_urls[0]
+    : raffle.image_url;
 
   return (
     <div className="dash-row">
       <div className="dash-row-img">
-        {raffle.image_url
-          ? <img src={raffle.image_url} alt={raffle.title} />
+        {coverImage
+          ? <img src={coverImage} alt={raffle.title} />
           : <span>🎁</span>}
       </div>
       <div className="dash-row-info">

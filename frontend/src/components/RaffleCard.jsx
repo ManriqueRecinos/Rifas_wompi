@@ -4,12 +4,15 @@ import './RaffleCard.css';
 export default function RaffleCard({ raffle }) {
   const pct = Math.round((raffle.sold_tickets / raffle.total_tickets) * 100);
   const available = raffle.total_tickets - raffle.sold_tickets;
+  const coverImage = Array.isArray(raffle.image_urls) && raffle.image_urls.length > 0
+    ? raffle.image_urls[0]
+    : raffle.image_url;
 
   return (
     <Link to={`/raffle/${raffle.id}`} className="raffle-card">
       <div className="card-img-wrap">
-        {raffle.image_url
-          ? <img src={raffle.image_url} alt={raffle.title} className="card-img" />
+        {coverImage
+          ? <img src={coverImage} alt={raffle.title} className="card-img" />
           : <div className="card-img-placeholder">🎁</div>
         }
         <span className="card-price">${parseFloat(raffle.ticket_price).toFixed(2)}</span>
