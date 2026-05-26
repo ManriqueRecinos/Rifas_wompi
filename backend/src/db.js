@@ -28,13 +28,20 @@ if (!connectionString && missingFields.length > 0) {
 
 const pool = new Pool({
   ...poolConfig,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 30000,
   idleTimeoutMillis: 30000,
 });
 
-async function ensureRaffleImageColumns() {
-  try {
-    await pool.query(`
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureRaffleImageColumns(maxAttempts = 4) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await pool.query(`
       ALTER TABLE raffles
       ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb
     `);
@@ -94,12 +101,23 @@ async function ensureRaffleImageColumns() {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_validation_code
       ON raffle_tickets(validation_code)
     `);
-  } catch (err) {
-    console.error('No se pudo preparar la columna image_urls en raffles:', err.message);
+
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        await sleep(1000 * attempt);
+        continue;
+      }
+    }
   }
+
+  console.warn('[DB] No se pudo preparar el esquema automáticamente:', lastError.message);
 }
 
-ensureRaffleImageColumns();
+ensureRaffleImageColumns().catch((err) => {
+  console.warn('[DB] Error inesperado preparando el esquema:', err.message);
+});
 
 pool.on('error', (err) => {
   console.error('Unexpected DB error', err);
