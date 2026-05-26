@@ -28,6 +28,14 @@ async function uploadImagesSequentially(files) {
   return uploadedUrls;
 }
 
+async function getNextTicketSequenceStart(client, raffleId) {
+  const { rows } = await client.query(
+    'SELECT COUNT(*) AS cnt FROM raffle_tickets WHERE raffle_id=$1',
+    [raffleId],
+  );
+  return parseInt(rows[0].cnt, 10) + 1;
+}
+
 // ── Listar rifas públicas ────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -311,6 +319,7 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const quantity = Math.max(1, parseInt(req.body.quantity || '1', 10));
     const { buyer_name, buyer_email } = req.body;
     if (!buyer_name || !buyer_email) {
       return res.status(400).json({ error: 'buyer_name y buyer_email son requeridos' });
@@ -329,43 +338,31 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
     }
 
     // 2. Verificar disponibilidad de tickets
-    if (raffle.sold_tickets >= raffle.total_tickets) {
+    if (raffle.sold_tickets + quantity > raffle.total_tickets) {
       return res.status(400).json({ error: 'La rifa ya está agotada' });
     }
 
-    // 3. Generar número de ticket correlativo
-    const { rows: cntRows } = await client.query(
-      `SELECT COUNT(*) AS cnt FROM raffle_tickets WHERE raffle_id=$1`, [raffle.id],
-    );
-    const seq = parseInt(cntRows[0].cnt) + 1;
-    const ticketNumber = String(seq).padStart(4, '0');
-
-    // 4. Crear código de transacción falso/representativo para efectivo
-    const txId = `CASH-${raffle.id}-${ticketNumber}-${Date.now().toString().slice(-4)}`;
-
-    // 5. Registrar ticket en base de datos
-    const { rows: ticketRows } = await client.query(
-      `INSERT INTO raffle_tickets
-         (raffle_id, ticket_number, buyer_name, buyer_email,
-          wompi_transaction_id, wompi_authorization_code, amount_paid, status)
-       VALUES($1,$2,$3,$4,$5,'CASH_OK',$6,'confirmed') RETURNING *`,
-      [raffle.id, ticketNumber, buyer_name, buyer_email, txId, raffle.ticket_price],
-    );
-    const ticket = ticketRows[0];
-
-    // 6. Actualizar contador de vendidos
-    await client.query(
-      'UPDATE raffles SET sold_tickets=sold_tickets+1 WHERE id=$1', [raffle.id],
-    );
-
-    // 7. Generar e iniciar envío de ticket por correo en segundo plano
+    const startSequence = await getNextTicketSequenceStart(client, raffle.id);
     const { generateTicketPDF } = require('../services/ticketService');
     const { uploadBuffer } = require('../services/cloudinaryService');
     const { sendTicketEmail } = require('../services/emailService');
 
-    let pdfBuffer;
-    try {
-      pdfBuffer = await generateTicketPDF({
+    const createdTickets = [];
+    for (let index = 0; index < quantity; index += 1) {
+      const ticketNumber = String(startSequence + index).padStart(4, '0');
+      const txId = `CASH-${raffle.id}-${ticketNumber}-${Date.now().toString().slice(-4)}${quantity > 1 ? `-${index + 1}` : ''}`;
+
+      const { rows: ticketRows } = await client.query(
+        `INSERT INTO raffle_tickets
+           (raffle_id, ticket_number, buyer_name, buyer_email,
+            wompi_transaction_id, wompi_authorization_code, amount_paid, status)
+         VALUES($1,$2,$3,$4,$5,'CASH_OK',$6,'confirmed') RETURNING *`,
+        [raffle.id, ticketNumber, buyer_name, buyer_email, txId, raffle.ticket_price],
+      );
+
+      const ticket = ticketRows[0];
+
+      const pdfBuffer = await generateTicketPDF({
         ticketNumber,
         buyerName: buyer_name,
         buyerEmail: buyer_email,
@@ -377,11 +374,7 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
         transactionId: txId,
         purchasedAt: ticket.purchased_at,
       });
-    } catch (pdfErr) {
-      console.error('[Cash-Purchase] Error generating PDF:', pdfErr.message);
-    }
 
-    if (pdfBuffer) {
       try {
         await sendTicketEmail({
           to: buyer_email,
@@ -407,10 +400,16 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
       } catch (uploadErr) {
         console.error('[Cash-Purchase] Error uploading PDF:', uploadErr.message);
       }
+
+      createdTickets.push(ticket);
     }
 
+    await client.query(
+      'UPDATE raffles SET sold_tickets=sold_tickets+$1 WHERE id=$2', [quantity, raffle.id],
+    );
+
     await client.query('COMMIT');
-    res.status(201).json({ success: true, ticket });
+    res.status(201).json({ success: true, tickets: createdTickets });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
@@ -427,6 +426,7 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
     await client.query('BEGIN');
 
     const raffleId = parseInt(req.params.id, 10);
+    const quantity = Math.max(1, parseInt(req.body.quantity || '1', 10));
     const { txId, buyer_name, buyer_email, amount_paid } = req.body;
 
     if (!raffleId || !txId || !buyer_name || !buyer_email) {
@@ -442,91 +442,87 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
     const raffle = raffleRows[0];
 
     const { rows: existingRows } = await client.query(
-      'SELECT * FROM raffle_tickets WHERE wompi_transaction_id=$1', [txId],
+      'SELECT * FROM raffle_tickets WHERE wompi_transaction_id=$1 OR wompi_transaction_id LIKE $2',
+      [txId, `${txId}-%`],
     );
 
-    let ticket;
-    let needsIncrement = false;
-
     if (existingRows.length) {
-      ticket = existingRows[0];
-      await client.query(
-        `UPDATE raffle_tickets
-            SET buyer_name=$1,
-                buyer_email=$2,
-                amount_paid=COALESCE($3, amount_paid),
-                status='confirmed'
-          WHERE id=$4`,
-        [buyer_name, buyer_email, amount_paid, ticket.id],
-      );
+      await client.query('COMMIT');
+      return res.json({ success: true, ticket: existingRows[0], tickets: existingRows });
+    }
 
-      const { rows: refreshedRows } = await client.query(
-        'SELECT * FROM raffle_tickets WHERE id=$1', [ticket.id],
-      );
-      ticket = refreshedRows[0];
-    } else {
-      const ticketNumber = await generateTicketNumber(raffleId);
+    if (raffle.sold_tickets + quantity > raffle.total_tickets) {
+      return res.status(400).json({ error: 'La rifa ya está agotada' });
+    }
+
+    const startSequence = await getNextTicketSequenceStart(client, raffleId);
+
+    const { generateTicketPDF } = require('../services/ticketService');
+    const { uploadBuffer } = require('../services/cloudinaryService');
+    const { sendTicketEmail } = require('../services/emailService');
+    const createdTickets = [];
+
+    for (let index = 0; index < quantity; index += 1) {
+      const ticketNumber = String(startSequence + index).padStart(4, '0');
+      const txSuffix = quantity > 1 ? `-${index + 1}` : '';
+      const uniqueTxId = `${txId}${txSuffix}`;
+
       const { rows: insertedRows } = await client.query(
         `INSERT INTO raffle_tickets
            (raffle_id, ticket_number, buyer_name, buyer_email,
             wompi_transaction_id, wompi_authorization_code, amount_paid, status)
          VALUES($1,$2,$3,$4,$5,$6,$7,'confirmed') RETURNING *`,
-        [raffleId, ticketNumber, buyer_name, buyer_email, txId, null, amount_paid || raffle.ticket_price],
+        [raffleId, ticketNumber, buyer_name, buyer_email, uniqueTxId, null, raffle.ticket_price],
       );
-      ticket = insertedRows[0];
-      needsIncrement = true;
-    }
+      const ticket = insertedRows[0];
 
-    if (needsIncrement) {
-      await client.query(
-        'UPDATE raffles SET sold_tickets=sold_tickets+1 WHERE id=$1', [raffleId],
-      );
-    }
+      const pdfBuffer = await generateTicketPDF({
+        ticketNumber,
+        buyerName: buyer_name,
+        buyerEmail: buyer_email,
+        raffleTitle: raffle.title,
+        raffleDescription: raffle.description,
+        raffleImage: raffle.image_url,
+        ticketPrice: raffle.ticket_price,
+        drawDate: raffle.draw_date,
+        transactionId: uniqueTxId,
+        purchasedAt: ticket.purchased_at,
+      });
 
-    const { generateTicketPDF } = require('../services/ticketService');
-    const { uploadBuffer } = require('../services/cloudinaryService');
-    const { sendTicketEmail } = require('../services/emailService');
+      await sendTicketEmail({
+        to: buyer_email,
+        buyerName: buyer_name,
+        buyerEmail: buyer_email,
+        raffleTitle: raffle.title,
+        ticketNumber,
+        pdfBuffer,
+      });
 
-    const pdfBuffer = await generateTicketPDF({
-      ticketNumber: ticket.ticket_number,
-      buyerName: buyer_name,
-      buyerEmail: buyer_email,
-      raffleTitle: raffle.title,
-      raffleDescription: raffle.description,
-      raffleImage: raffle.image_url,
-      ticketPrice: raffle.ticket_price,
-      drawDate: raffle.draw_date,
-      transactionId: txId,
-      purchasedAt: ticket.purchased_at,
-    });
-
-    await sendTicketEmail({
-      to: buyer_email,
-      buyerName: buyer_name,
-      buyerEmail: buyer_email,
-      raffleTitle: raffle.title,
-      ticketNumber: ticket.ticket_number,
-      pdfBuffer,
-    });
-
-    if (!ticket.ticket_pdf_url) {
-      try {
-        const pdfUrl = await uploadBuffer(
-          pdfBuffer,
-          'rifas/tickets',
-          `ticket-${raffleId}-${ticket.ticket_number}.pdf`,
-        );
-        await client.query(
-          'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
-        );
-        ticket.ticket_pdf_url = pdfUrl;
-      } catch (uploadErr) {
-        console.error('[Wompi-Confirm] PDF no se pudo subir a Cloudinary:', uploadErr.message);
+      if (!ticket.ticket_pdf_url) {
+        try {
+          const pdfUrl = await uploadBuffer(
+            pdfBuffer,
+            'rifas/tickets',
+            `ticket-${raffleId}-${ticketNumber}.pdf`,
+          );
+          await client.query(
+            'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
+          );
+          ticket.ticket_pdf_url = pdfUrl;
+        } catch (uploadErr) {
+          console.error('[Wompi-Confirm] PDF no se pudo subir a Cloudinary:', uploadErr.message);
+        }
       }
+
+      createdTickets.push(ticket);
     }
+
+    await client.query(
+      'UPDATE raffles SET sold_tickets=sold_tickets+$1 WHERE id=$2', [quantity, raffleId],
+    );
 
     await client.query('COMMIT');
-    res.json({ success: true, ticket });
+    res.json({ success: true, tickets: createdTickets });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[Wompi-Confirm] Error:', err);

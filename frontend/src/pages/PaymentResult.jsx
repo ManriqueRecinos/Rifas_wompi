@@ -48,6 +48,7 @@ export default function PaymentResult() {
         txId: idTx,
         buyer_name: pendingData.buyerName,
         buyer_email: pendingData.buyerEmail,
+        quantity: pendingData.quantity || 1,
         amount_paid: params.get('monto') || null,
       })
         .then(() => {

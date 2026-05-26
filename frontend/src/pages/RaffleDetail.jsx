@@ -16,6 +16,7 @@ export default function RaffleDetail() {
   const [showModal, setShowModal] = useState(false);
   const [buyerName, setBuyerName] = useState('');
   const [buyerEmail, setBuyerEmail] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [downloadingPdfId, setDownloadingPdfId] = useState(null);
 
   useEffect(() => {
@@ -45,8 +46,11 @@ export default function RaffleDetail() {
 
   const handleOpenPurchase = () => {
     if (!raffle?.wompi_url_enlace) return;
+    setQuantity(1);
     setShowModal(true);
   };
+
+  const normalizedQuantity = Math.max(1, parseInt(quantity || '1', 10));
 
   const handleConfirmPurchase = () => {
     if (!buyerName.trim() || !buyerEmail.trim()) {
@@ -61,6 +65,8 @@ export default function RaffleDetail() {
         raffleId: id,
         buyerName: buyerName.trim(),
         buyerEmail: buyerEmail.trim(),
+        quantity: normalizedQuantity,
+        totalAmount: (parseFloat(raffle.ticket_price) * normalizedQuantity).toFixed(2),
         createdAt: new Date().toISOString(),
       }),
     );
@@ -70,6 +76,7 @@ export default function RaffleDetail() {
     const checkoutUrl = new URL(raffle.wompi_url_enlace);
     checkoutUrl.searchParams.set('name', buyerName);
     checkoutUrl.searchParams.set('email', buyerEmail);
+    checkoutUrl.searchParams.set('monto', (parseFloat(raffle.ticket_price) * normalizedQuantity).toFixed(2));
 
     window.location.href = checkoutUrl.toString();
   };
@@ -82,7 +89,8 @@ export default function RaffleDetail() {
     setBuying(true);
     api.post(`/raffles/${id}/cash-purchase`, {
       buyer_name: buyerName,
-      buyer_email: buyerEmail
+      buyer_email: buyerEmail,
+      quantity: normalizedQuantity,
     })
       .then((res) => {
         alert('🎟️ Ticket físico registrado y correo enviado con éxito.');
@@ -328,6 +336,19 @@ export default function RaffleDetail() {
                   placeholder="Ej. juan@email.com"
                   value={buyerEmail}
                   onChange={(e) => setBuyerEmail(e.target.value)}
+                />
+              </div>
+              <div className="input-group">
+                <label>Cantidad de tickets</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={quantity}
+                  onChange={(e) => {
+                    const nextQuantity = parseInt(e.target.value || '1', 10);
+                    setQuantity(Number.isNaN(nextQuantity) ? 1 : Math.max(1, nextQuantity));
+                  }}
                 />
               </div>
             </div>
