@@ -181,6 +181,65 @@ router.get('/purchases/mine', auth, async (req, res) => {
   }
 });
 
+// ── Descargar PDF del ticket ──────────────────────────────────
+router.get('/tickets/:ticketId/pdf', auth, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const { rows } = await pool.query(
+      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
+              r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
+              r.ticket_price, r.draw_date
+         FROM raffle_tickets t
+         JOIN raffles r ON t.raffle_id = r.id
+        WHERE t.id = $1`,
+      [ticketId],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = rows[0];
+    const { rows: raffleOwner } = await pool.query(
+      'SELECT user_id FROM raffles WHERE id = $1', [ticket.raffle_id],
+    );
+
+    const isBuyer = ticket.buyer_email === req.user.email;
+    const isOwner = raffleOwner.length && raffleOwner[0].user_id === req.user.id;
+
+    if (!isBuyer && !isOwner) {
+      return res.status(403).json({ error: 'No tienes permiso para descargar este ticket' });
+    }
+
+    const { generateTicketPDF } = require('../services/ticketService');
+    const primaryImage = Array.isArray(ticket.raffle_image_urls) && ticket.raffle_image_urls.length
+      ? ticket.raffle_image_urls[0]
+      : ticket.raffle_image;
+
+    const pdfBuffer = await generateTicketPDF({
+      ticketNumber:      ticket.ticket_number,
+      buyerName:         ticket.buyer_name || 'Comprador',
+      buyerEmail:        ticket.buyer_email || '',
+      raffleTitle:       ticket.raffle_title,
+      raffleDescription: ticket.raffle_description,
+      raffleImage:       primaryImage,
+      ticketPrice:       ticket.ticket_price,
+      drawDate:          ticket.draw_date,
+      transactionId:     ticket.wompi_transaction_id || 'EFECTIVO',
+      purchasedAt:       ticket.purchased_at,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="ticket-${ticket.ticket_number}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[Ticket-PDF] Error al descargar PDF:', err);
+    res.status(500).json({ error: 'Error al generar el PDF del ticket' });
+  }
+});
+
 // ── Reenviar ticket por correo electrónico ──────────────────────
 router.post('/tickets/:ticketId/resend', auth, async (req, res) => {
   try {
@@ -324,19 +383,6 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
 
     if (pdfBuffer) {
       try {
-        const pdfUrl = await uploadBuffer(
-          pdfBuffer,
-          'rifas/tickets',
-          `ticket-${raffle.id}-${ticketNumber}.pdf`,
-        );
-        await client.query(
-          'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
-        );
-      } catch (uploadErr) {
-        console.error('[Cash-Purchase] Error uploading PDF:', uploadErr.message);
-      }
-
-      try {
         await sendTicketEmail({
           to: buyer_email,
           buyerName: buyer_name,
@@ -347,6 +393,19 @@ router.post('/:id/cash-purchase', auth, async (req, res) => {
         });
       } catch (emailErr) {
         console.error('[Cash-Purchase] Error sending email:', emailErr.message);
+      }
+
+      try {
+        const pdfUrl = await uploadBuffer(
+          pdfBuffer,
+          'rifas/tickets',
+          `ticket-${raffle.id}-${ticketNumber}.pdf`,
+        );
+        await client.query(
+          'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
+        );
+      } catch (uploadErr) {
+        console.error('[Cash-Purchase] Error uploading PDF:', uploadErr.message);
       }
     }
 
@@ -441,18 +500,6 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
       purchasedAt: ticket.purchased_at,
     });
 
-    if (!ticket.ticket_pdf_url) {
-      const pdfUrl = await uploadBuffer(
-        pdfBuffer,
-        'rifas/tickets',
-        `ticket-${raffleId}-${ticket.ticket_number}.pdf`,
-      );
-      await client.query(
-        'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
-      );
-      ticket.ticket_pdf_url = pdfUrl;
-    }
-
     await sendTicketEmail({
       to: buyer_email,
       buyerName: buyer_name,
@@ -461,6 +508,22 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
       ticketNumber: ticket.ticket_number,
       pdfBuffer,
     });
+
+    if (!ticket.ticket_pdf_url) {
+      try {
+        const pdfUrl = await uploadBuffer(
+          pdfBuffer,
+          'rifas/tickets',
+          `ticket-${raffleId}-${ticket.ticket_number}.pdf`,
+        );
+        await client.query(
+          'UPDATE raffle_tickets SET ticket_pdf_url=$1 WHERE id=$2', [pdfUrl, ticket.id],
+        );
+        ticket.ticket_pdf_url = pdfUrl;
+      } catch (uploadErr) {
+        console.error('[Wompi-Confirm] PDF no se pudo subir a Cloudinary:', uploadErr.message);
+      }
+    }
 
     await client.query('COMMIT');
     res.json({ success: true, ticket });

@@ -16,6 +16,7 @@ export default function RaffleDetail() {
   const [showModal, setShowModal] = useState(false);
   const [buyerName, setBuyerName] = useState('');
   const [buyerEmail, setBuyerEmail] = useState('');
+  const [downloadingPdfId, setDownloadingPdfId] = useState(null);
 
   useEffect(() => {
     api.get(`/raffles/${id}`)
@@ -97,6 +98,29 @@ export default function RaffleDetail() {
         alert(err.response?.data?.error || 'Error al registrar el pago en efectivo.');
       })
       .finally(() => setBuying(false));
+  };
+
+  const handleDownloadTicketPdf = async (ticketId, ticketNumber) => {
+    try {
+      setDownloadingPdfId(ticketId);
+      const response = await api.get(`/raffles/tickets/${ticketId}/pdf`, {
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ticket-${ticketNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.response?.data?.error || 'No se pudo generar el PDF del ticket.');
+    } finally {
+      setDownloadingPdfId(null);
+    }
   };
 
   if (loading) return <div className="detail-loading">Cargando...</div>;
@@ -254,11 +278,21 @@ export default function RaffleDetail() {
                       <span>Método: {t.wompi_transaction_id ? 'Wompi' : 'Efectivo'}</span>
                     </div>
                   </div>
-                  {t.ticket_pdf_url && (
-                    <a href={t.ticket_pdf_url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--accent)', textDecoration: 'underline', marginTop: '6px', fontWeight: 'bold', display: 'inline-block' }}>
-                      📄 Descargar PDF
-                    </a>
-                  )}
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTicketPdf(t.id, t.ticket_number)}
+                      disabled={downloadingPdfId === t.id}
+                      style={{ background: 'var(--accent)', color: '#111', border: 'none', borderRadius: '8px', padding: '8px 12px', fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      {downloadingPdfId === t.id ? 'Generando PDF...' : '📄 Descargar PDF'}
+                    </button>
+                    {t.ticket_pdf_url && (
+                      <a href={t.ticket_pdf_url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--accent)', textDecoration: 'underline', alignSelf: 'center', fontWeight: 'bold' }}>
+                        Abrir PDF guardado
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
