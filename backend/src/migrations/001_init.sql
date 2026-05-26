@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   name        VARCHAR(255) NOT NULL,
   email       VARCHAR(255) UNIQUE NOT NULL,
   password    VARCHAR(255) NOT NULL,
+  phone       VARCHAR(50),
   avatar_url  VARCHAR(500),
   created_at  TIMESTAMP DEFAULT NOW()
 );
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS raffle_tickets (
   wompi_authorization_code  VARCHAR(255),
   amount_paid               DECIMAL(10,2),
   status                    VARCHAR(50) DEFAULT 'pending',  -- pending | confirmed | cancelled
+  redeemed_at               TIMESTAMP,
   ticket_pdf_url            VARCHAR(500),
   purchased_at              TIMESTAMP DEFAULT NOW()
 );

@@ -54,7 +54,7 @@ export function Register() {
   const { register } = useAuth();
   const nav           = useNavigate();
   const [form, setF]  = useState({
-    name: '', email: '', password: '',
+    name: '', email: '', password: '', phone: '',
     wompi_app_id: '', wompi_secret: '',
   });
   const [err,  setE]       = useState('');
@@ -66,6 +66,7 @@ export function Register() {
     try {
       await register(
         form.name, form.email, form.password,
+        form.phone || undefined,
         form.wompi_app_id || undefined,
         form.wompi_secret || undefined,
       );
@@ -96,6 +97,10 @@ export function Register() {
           <label>Contraseña
             <input type="password" value={form.password} minLength={6}
               onChange={e => setF(f => ({...f, password: e.target.value}))} required />
+          </label>
+          <label>Teléfono de contacto (opcional)
+            <input type="text" value={form.phone}
+              onChange={e => setF(f => ({...f, phone: e.target.value}))} />
           </label>
 
           {/* Sección de Wompi colapsable */}

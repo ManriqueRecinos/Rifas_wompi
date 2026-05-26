@@ -41,10 +41,20 @@ async function getNextTicketSequenceStart(client, raffleId) {
 
 async function selectAutomaticWinner(client, raffleId) {
   const { rows: raffleRows } = await client.query(
-    'SELECT id, winning_ticket_id FROM raffles WHERE id=$1', [raffleId],
+    'SELECT id, winning_ticket_id, winning_ticket_ids FROM raffles WHERE id=$1', [raffleId],
   );
-  if (!raffleRows.length || raffleRows[0].winning_ticket_id) {
-    return raffleRows[0]?.winning_ticket_id || null;
+  if (!raffleRows.length) {
+    return null;
+  }
+
+  const existingWinnerIds = Array.isArray(raffleRows[0].winning_ticket_ids)
+    ? raffleRows[0].winning_ticket_ids
+    : raffleRows[0].winning_ticket_id
+      ? [raffleRows[0].winning_ticket_id]
+      : [];
+
+  if (existingWinnerIds.length) {
+    return existingWinnerIds[0];
   }
 
   const { rows: ticketRows } = await client.query(
@@ -204,7 +214,7 @@ router.get('/validate-ticket/:code', async (req, res) => {
       `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
               r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
               r.draw_date, r.status AS raffle_status, r.winning_ticket_id, r.winning_ticket_ids,
-              u.name AS organizer_name
+              u.name AS organizer_name, u.phone AS organizer_phone
          FROM raffle_tickets t
          JOIN raffles r ON r.id = t.raffle_id
          JOIN users u ON u.id = r.user_id
@@ -237,6 +247,7 @@ router.get('/validate-ticket/:code', async (req, res) => {
         raffle_image: getPrimaryRaffleImage(ticket),
         draw_date: ticket.draw_date,
         organizer_name: ticket.organizer_name,
+        organizer_phone: ticket.organizer_phone,
         raffle_status: ticket.raffle_status,
         is_winner: isWinner,
       },
@@ -262,58 +273,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ── Crear rifa + enlace Wompi ─────────────────────────────────
-
-// ── Validar ticket público por código QR ──────────────────────
-router.get('/validate-ticket/:code', async (req, res) => {
-  try {
-    const { code } = req.params;
-    if (!verifyValidationCode(code)) {
-      return res.status(400).json({ error: 'Código de validación inválido' });
-    }
-
-    const { rows } = await pool.query(
-      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
-              r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
-              r.draw_date, r.status AS raffle_status, r.winning_ticket_id,
-              u.name AS organizer_name
-         FROM raffle_tickets t
-         JOIN raffles r ON r.id = t.raffle_id
-         JOIN users u ON u.id = r.user_id
-        WHERE t.validation_code = $1`,
-      [code],
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({ error: 'Ticket no encontrado' });
-    }
-
-    const ticket = rows[0];
-    const isWinner = ticket.winning_ticket_id && ticket.winning_ticket_id === ticket.id;
-
-    res.json({
-      valid: true,
-      isWinner,
-      ticket: {
-        id: ticket.id,
-        ticket_number: ticket.ticket_number,
-        buyer_name: ticket.buyer_name,
-        buyer_email: ticket.buyer_email,
-        amount_paid: ticket.amount_paid,
-        purchased_at: ticket.purchased_at,
-        raffle_title: ticket.raffle_title,
-        raffle_description: ticket.raffle_description,
-        raffle_image: getPrimaryRaffleImage(ticket),
-        draw_date: ticket.draw_date,
-        organizer_name: ticket.organizer_name,
-        raffle_status: ticket.raffle_status,
-      },
-    });
-  } catch (err) {
-    console.error('[Validate-Ticket] Error:', err);
-    res.status(500).json({ error: 'Error al validar el ticket' });
-  }
-});
 router.post('/', auth, upload.any(), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -670,53 +629,6 @@ router.post('/:id/confirm-wompi-purchase', async (req, res) => {
     await client.query('BEGIN');
 
     const raffleId = parseInt(req.params.id, 10);
-
-// ── Finalizar sorteo manual ───────────────────────────────────
-router.post('/:id/manual-draw', auth, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const raffleId = parseInt(req.params.id, 10);
-    const { winner_ticket_id, winner_ticket_ids = [], eliminated_ticket_ids = [] } = req.body;
-    const normalizedWinnerIds = Array.isArray(winner_ticket_ids) && winner_ticket_ids.length
-      ? winner_ticket_ids
-      : (winner_ticket_id ? [winner_ticket_id] : []);
-
-    const { rows: raffleRows } = await client.query(
-      'SELECT user_id, winning_ticket_id, status FROM raffles WHERE id=$1', [raffleId],
-    );
-    if (!raffleRows.length) {
-      return res.status(404).json({ error: 'Rifa no encontrada' });
-    }
-    if (raffleRows[0].user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Sin permisos' });
-    }
-
-    const { rows: ticketRows } = await client.query(
-      'SELECT id FROM raffle_tickets WHERE raffle_id=$1', [raffleId],
-    );
-    if (!ticketRows.length) {
-      return res.status(400).json({ error: 'No hay tickets para sortear' });
-    }
-
-    const result = await finalizeManualDraw(
-      client,
-      raffleId,
-      normalizedWinnerIds,
-      eliminated_ticket_ids,
-    );
-
-    await client.query('COMMIT');
-    res.json({ success: true, ...result });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('[Manual-Draw] Error:', err);
-    res.status(500).json({ error: err.message || 'No se pudo finalizar el sorteo' });
-  } finally {
-    client.release();
-  }
-});
     const quantity = Math.max(1, parseInt(req.body.quantity || '1', 10));
     const { txId, buyer_name, buyer_email, amount_paid } = req.body;
 
@@ -827,6 +739,144 @@ router.post('/:id/manual-draw', auth, async (req, res) => {
     await client.query('ROLLBACK');
     console.error('[Wompi-Confirm] Error:', err);
     res.status(500).json({ error: 'Error al confirmar el pago' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Finalizar sorteo manual ───────────────────────────────────
+router.post('/:id/manual-draw', auth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const raffleId = parseInt(req.params.id, 10);
+    const { winner_ticket_id, winner_ticket_ids = [], eliminated_ticket_ids = [] } = req.body;
+    const normalizedWinnerIds = Array.isArray(winner_ticket_ids) && winner_ticket_ids.length
+      ? winner_ticket_ids
+      : (winner_ticket_id ? [winner_ticket_id] : []);
+
+    const { rows: raffleRows } = await client.query(
+      'SELECT user_id, winning_ticket_id, status FROM raffles WHERE id=$1', [raffleId],
+    );
+    if (!raffleRows.length) {
+      return res.status(404).json({ error: 'Rifa no encontrada' });
+    }
+    if (raffleRows[0].user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
+    const { rows: ticketRows } = await client.query(
+      'SELECT id FROM raffle_tickets WHERE raffle_id=$1', [raffleId],
+    );
+    if (!ticketRows.length) {
+      return res.status(400).json({ error: 'No hay tickets para sortear' });
+    }
+
+    const result = await finalizeManualDraw(
+      client,
+      raffleId,
+      normalizedWinnerIds,
+      eliminated_ticket_ids,
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, ...result });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Manual-Draw] Error:', err);
+    res.status(500).json({ error: err.message || 'No se pudo finalizar el sorteo' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Validar ganador y canjear premio ──────────────────────────
+router.post('/validate-winner', auth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: 'El código del ticket es requerido' });
+    }
+
+    if (!verifyValidationCode(code)) {
+      return res.status(400).json({ error: 'Código de validación inválido' });
+    }
+
+    const { rows } = await client.query(
+      `SELECT t.*, r.title AS raffle_title, r.description AS raffle_description,
+              r.image_url AS raffle_image, r.image_urls AS raffle_image_urls,
+              r.draw_date, r.status AS raffle_status, r.winning_ticket_id, r.winning_ticket_ids,
+              r.user_id AS organizer_user_id, u.name AS organizer_name, u.phone AS organizer_phone
+         FROM raffle_tickets t
+         JOIN raffles r ON r.id = t.raffle_id
+         JOIN users u ON u.id = r.user_id
+        WHERE t.validation_code = $1`,
+      [code],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = rows[0];
+    if (ticket.organizer_user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Este ticket no pertenece a tu rifa' });
+    }
+
+    const winningIds = Array.isArray(ticket.winning_ticket_ids)
+      ? ticket.winning_ticket_ids.map((value) => parseInt(value, 10)).filter(Boolean)
+      : [];
+    const isWinner = winningIds.includes(ticket.id) || ticket.winning_ticket_id === ticket.id;
+
+    if (!isWinner) {
+      return res.status(400).json({ error: 'Este ticket no es ganador' });
+    }
+
+    if (ticket.status === 'redeemed') {
+      return res.status(409).json({ error: 'Este ticket ya fue canjeado' });
+    }
+
+    await client.query(
+      `UPDATE raffle_tickets
+          SET status='redeemed', redeemed_at=NOW()
+        WHERE id=$1`,
+      [ticket.id],
+    );
+
+    const { sendWinnerValidationEmail } = require('../services/emailService');
+    await sendWinnerValidationEmail({
+      to: ticket.buyer_email,
+      buyerName: ticket.buyer_name,
+      buyerEmail: ticket.buyer_email,
+      raffleTitle: ticket.raffle_title,
+      ticketNumber: ticket.ticket_number,
+      organizerName: ticket.organizer_name,
+      organizerPhone: ticket.organizer_phone,
+    });
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      validated: true,
+      redeemed: true,
+      ticket: {
+        id: ticket.id,
+        ticket_number: ticket.ticket_number,
+        buyer_name: ticket.buyer_name,
+        buyer_email: ticket.buyer_email,
+        organizer_name: ticket.organizer_name,
+        organizer_phone: ticket.organizer_phone,
+        raffle_title: ticket.raffle_title,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Validate-Winner] Error:', err);
+    res.status(500).json({ error: err.message || 'No se pudo validar el ganador' });
   } finally {
     client.release();
   }

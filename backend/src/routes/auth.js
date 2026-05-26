@@ -9,7 +9,7 @@ const router   = express.Router();
 // ── Registro ──────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, wompi_app_id, wompi_secret } = req.body;
+    const { name, email, password, phone, wompi_app_id, wompi_secret } = req.body;
     if (!name || !email || !password)
       return res.status(400).json({ error: 'Nombre, correo y contraseña son requeridos' });
 
@@ -31,10 +31,10 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
-      `INSERT INTO users(name, email, password, wompi_app_id, wompi_secret, wompi_validated)
-       VALUES($1,$2,$3,$4,$5,$6)
-       RETURNING id, name, email, wompi_app_id, wompi_validated, created_at`,
-      [name, email, hash, wompi_app_id || null, wompi_secret || null, wompiValidated],
+      `INSERT INTO users(name, email, password, phone, wompi_app_id, wompi_secret, wompi_validated)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id, name, email, phone, wompi_app_id, wompi_validated, created_at`,
+      [name, email, hash, phone || null, wompi_app_id || null, wompi_secret || null, wompiValidated],
     );
     const user  = rows[0];
     const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
@@ -68,7 +68,7 @@ router.post('/login', async (req, res) => {
 // ── Perfil ────────────────────────────────────────────────────
 router.get('/me', auth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, name, email, avatar_url, wompi_app_id, wompi_validated, created_at
+    `SELECT id, name, email, phone, avatar_url, wompi_app_id, wompi_validated, created_at
      FROM users WHERE id=$1`,
     [req.user.id],
   );

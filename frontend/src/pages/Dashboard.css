@@ -3,6 +3,7 @@
   display:flex; align-items:center; justify-content:space-between;
   margin-bottom:32px; flex-wrap:wrap; gap:16px;
 }
+.dash-header-actions { display:flex; gap:10px; flex-wrap:wrap; }
 .dash-title {
   font-family:'Bebas Neue',sans-serif;
   font-size:38px; letter-spacing:2px; color:var(--text);
@@ -17,6 +18,14 @@
   transition:background .2s;
 }
 .dash-create-btn:hover { background:var(--accent2); }
+.dash-secondary-btn {
+  background:transparent; color:var(--text2);
+  border:1px solid var(--border);
+  font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px;
+  padding:10px 20px; border-radius:var(--radius-sm);
+  transition:all .2s;
+}
+.dash-secondary-btn:hover { border-color:var(--accent); color:var(--accent); }
 
 .dash-stats {
   display:grid; grid-template-columns:repeat(3,1fr); gap:16px;

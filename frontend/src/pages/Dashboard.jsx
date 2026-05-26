@@ -27,7 +27,10 @@ export default function Dashboard() {
           <h1 className="dash-title">Mis Rifas</h1>
           <p className="dash-sub">Hola, <strong>{user?.name}</strong> 👋</p>
         </div>
-        <Link to="/create" className="dash-create-btn">+ Nueva Rifa</Link>
+        <div className="dash-header-actions">
+          <Link to="/validar-ganador" className="dash-secondary-btn">Validar ganador</Link>
+          <Link to="/create" className="dash-create-btn">+ Nueva Rifa</Link>
+        </div>
       </div>
 
       {/* Wompi Connection Card */}
@@ -190,6 +193,7 @@ function DashRaffleRow({ raffle }) {
       </div>
       <div className="dash-row-actions">
         <Link to={`/raffle/${raffle.id}/draw`} className="dash-draw-btn">🎲 Sorteo</Link>
+        <Link to="/validar-ganador" className="dash-link-btn">🏆 Validar ganador</Link>
         {raffle.wompi_url_enlace && (
           <a href={raffle.wompi_url_enlace} target="_blank" rel="noreferrer" className="dash-link-btn">
             🔗 Enlace Wompi
