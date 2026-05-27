@@ -1,5 +1,15 @@
 # 🎟️ Rifas App — Guía de Instalación Completa
 
+## Arranque rápido
+
+Desde la raíz del proyecto puedes ejecutar el script `start-dev.bat` para levantar backend y frontend a la vez:
+
+```bat
+start-dev.bat
+```
+
+El script instala dependencias solo si falta `node_modules` y abre dos ventanas de consola, una para cada servidor.
+
 ## Requisitos previos
 - Node.js 18+
 - npm o yarn
