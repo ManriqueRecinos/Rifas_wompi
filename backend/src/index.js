@@ -16,6 +16,19 @@ app.use('/api/auth',     require('./routes/auth'));
 app.use('/api/raffles',  require('./routes/raffles'));
 app.use('/api/webhooks', require('./routes/webhooks'));
 
+app.get('/payment/result', (req, res) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://10.10.15.6:5173';
+  const targetUrl = new URL('/payment/result', frontendUrl);
+
+  for (const [key, value] of Object.entries(req.query)) {
+    if (typeof value === 'string') {
+      targetUrl.searchParams.set(key, value);
+    }
+  }
+
+  return res.redirect(302, targetUrl.toString());
+});
+
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 

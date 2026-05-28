@@ -7,6 +7,14 @@ const WOMPI_API_URL  = 'https://api.wompi.sv';
 // ── Token cache (por appId) ──────────────────────────────────
 const _tokenCache = {};
 
+function getWompiErrorMessage(err) {
+  const apiError = err.response?.data;
+  if (!apiError) return err.message;
+
+  if (typeof apiError === 'string') return apiError;
+  return apiError.error_description || apiError.message || apiError.error || err.message;
+}
+
 async function getAccessToken(appId, secret) {
   const cacheKey = appId || 'global';
   const cached   = _tokenCache[cacheKey];
@@ -52,7 +60,6 @@ async function createPaymentLink(raffle, userCredentials) {
   const token  = await getAccessToken(appId, secret);
 
   const backendUrl  = process.env.BACKEND_URL  || 'http://10.10.15.6:3001';
-  const frontendUrl = process.env.FRONTEND_URL || 'http://10.10.15.6:5173';
 
   const body = {
     identificadorEnlaceComercio: `RIFA-${raffle.id}`,
@@ -70,15 +77,20 @@ async function createPaymentLink(raffle, userCredentials) {
       urlImagenProducto:   (Array.isArray(raffle.image_urls) && raffle.image_urls[0]) || raffle.image_url || null,
     },
     configuracion: {
-      urlRedirect:               `${frontendUrl}/payment/result?raffleId=${raffle.id}`,
+      urlRedirect:               `${backendUrl}/payment/result?raffleId=${raffle.id}`,
+      urlRetorno:                `${backendUrl}/payment/result?raffleId=${raffle.id}`,
       esMontoEditable:           false,
       esCantidadEditable:        false,
       cantidadPorDefecto:        1,
       notificarTransaccionCliente: true,
       urlWebhook:                `${backendUrl}/api/webhooks/wompi`,
-      emailsNotificacion:        null,
     },
   };
+
+  const notificationEmail = process.env.WOMPI_NOTIFICATION_EMAIL;
+  if (notificationEmail) {
+    body.configuracion.emailsNotificacion = notificationEmail;
+  }
 
   const { data } = await axios.post(`${WOMPI_API_URL}/EnlacePago`, body, {
     headers: {
@@ -101,5 +113,5 @@ async function getPaymentLink(id, userCredentials) {
   return data;
 }
 
-module.exports = { getAccessToken, validateCredentials, createPaymentLink, getPaymentLink };
+module.exports = { getAccessToken, validateCredentials, createPaymentLink, getPaymentLink, getWompiErrorMessage };
 

@@ -300,9 +300,18 @@ router.post('/', auth, upload.any(), async (req, res) => {
       [req.user.id],
     );
     const userData = userRows[0];
-    const userCredentials = (userData?.wompi_app_id && userData?.wompi_secret)
+    const userCredentials = (userData?.wompi_app_id && userData?.wompi_secret && userData?.wompi_validated)
       ? { appId: userData.wompi_app_id, secret: userData.wompi_secret }
       : null; // Usará las credenciales globales del .env
+
+    const hasEnvCredentials = process.env.WOMPI_APP_ID && process.env.WOMPI_SECRET;
+    if (!userCredentials && !hasEnvCredentials) {
+      await client.query(`UPDATE raffles SET status='draft' WHERE id=$1`, [raffle.id]);
+      await client.query('COMMIT');
+      return res.status(400).json({
+        error: 'Debes configurar y validar tus credenciales de Wompi antes de crear el enlace de pago.',
+      });
+    }
 
     // Crear enlace de pago en Wompi
     let wompiData = {};
@@ -318,7 +327,7 @@ router.post('/', auth, upload.any(), async (req, res) => {
       raffle.wompi_url_qr     = wompiData.urlQrCodeEnlace;
       raffle.status           = 'active';
     } catch (wompiErr) {
-      console.error('[Wompi] Error creando enlace:', wompiErr.message);
+      console.error('[Wompi] Error creando enlace:', wompi.getWompiErrorMessage(wompiErr));
       // Guardamos la rifa como draft si Wompi falla
       await client.query(`UPDATE raffles SET status='draft' WHERE id=$1`, [raffle.id]);
     }
