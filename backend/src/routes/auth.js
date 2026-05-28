@@ -5,6 +5,11 @@ const pool     = require('../db');
 const auth     = require('../middleware/auth');
 const { validateCredentials } = require('../services/wompiService');
 const router   = express.Router();
+const ADMIN_EMAIL = 'manrique.recinos23@gmail.com';
+
+function isAdminUser(req) {
+  return req.user?.email === ADMIN_EMAIL;
+}
 
 // ── Registro ──────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
@@ -113,6 +118,55 @@ router.put('/wompi-config', auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al configurar Wompi' });
+  }
+});
+
+// ── Admin: listar usuarios ────────────────────────────────────
+router.get('/admin/users', auth, async (req, res) => {
+  try {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: 'Sin permisos para ver usuarios' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, name, email, phone, created_at
+       FROM users
+       ORDER BY created_at DESC`
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener usuarios' });
+  }
+});
+
+// ── Admin: cambiar contraseña de cualquier usuario ───────────
+router.put('/admin/users/:id/password', auth, async (req, res) => {
+  try {
+    if (!isAdminUser(req)) {
+      return res.status(403).json({ error: 'Sin permisos para cambiar contraseñas' });
+    }
+
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const { rowCount } = await pool.query(
+      'UPDATE users SET password=$1 WHERE id=$2',
+      [hash, req.params.id],
+    );
+
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    res.json({ success: true, message: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al cambiar la contraseña' });
   }
 });
 

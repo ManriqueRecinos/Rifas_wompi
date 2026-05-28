@@ -51,6 +51,7 @@ export default function RaffleDetail() {
   };
 
   const normalizedQuantity = Math.max(1, parseInt(quantity || '1', 10));
+  const purchaseTotal = (parseFloat(raffle?.ticket_price || '0') * normalizedQuantity).toFixed(2);
 
   const handleConfirmPurchase = () => {
     if (!buyerName.trim() || !buyerEmail.trim()) {
@@ -66,7 +67,7 @@ export default function RaffleDetail() {
         buyerName: buyerName.trim(),
         buyerEmail: buyerEmail.trim(),
         quantity: normalizedQuantity,
-        totalAmount: (parseFloat(raffle.ticket_price) * normalizedQuantity).toFixed(2),
+        totalAmount: purchaseTotal,
         createdAt: new Date().toISOString(),
       }),
     );
@@ -76,7 +77,7 @@ export default function RaffleDetail() {
     const checkoutUrl = new URL(raffle.wompi_url_enlace);
     checkoutUrl.searchParams.set('name', buyerName);
     checkoutUrl.searchParams.set('email', buyerEmail);
-    checkoutUrl.searchParams.set('monto', (parseFloat(raffle.ticket_price) * normalizedQuantity).toFixed(2));
+    checkoutUrl.searchParams.set('monto', purchaseTotal);
 
     window.location.href = checkoutUrl.toString();
   };
@@ -106,6 +107,17 @@ export default function RaffleDetail() {
         alert(err.response?.data?.error || 'Error al registrar el pago en efectivo.');
       })
       .finally(() => setBuying(false));
+  };
+
+  const handleModalSubmit = (e) => {
+    e.preventDefault();
+
+    if (isOwner) {
+      handleConfirmCashPurchase();
+      return;
+    }
+
+    handleConfirmPurchase();
   };
 
   const handleDownloadTicketPdf = async (ticketId, ticketNumber) => {
@@ -317,32 +329,57 @@ export default function RaffleDetail() {
       {showModal && (
         <div className="purchase-modal-overlay">
           <div className="purchase-modal">
+            {buying && (
+              <div className="purchase-processing-layer" aria-live="polite" aria-busy="true">
+                <div className="purchase-processing-card">
+                  <div className="purchase-spinner" />
+                  <strong>{isOwner ? 'Registrando pago contra entrega...' : 'Preparando tu pago...'}</strong>
+                  <span>{isOwner ? 'Estamos guardando los datos y confirmando la transacción.' : 'Te estamos enviando a Wompi con tus datos listos.'}</span>
+                </div>
+              </div>
+            )}
             <div className="modal-header">
-              <h2>Confirmar tus Datos</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}>✕</button>
+              <div>
+                <h2>Confirma tu compra</h2>
+                <p className="modal-subtitle">Completa tus datos, revisa el resumen y finaliza en un solo paso.</p>
+              </div>
+              <button className="close-btn" onClick={() => setShowModal(false)} disabled={buying}>✕</button>
             </div>
-            <div className="modal-body">
+            <form className="modal-body" onSubmit={handleModalSubmit}>
+              <div className="purchase-steps">
+                <span className="purchase-step active">1. Tus datos</span>
+                <span className="purchase-step active">2. Cantidad</span>
+                <span className="purchase-step">3. Confirmar</span>
+              </div>
+
               <p className="modal-desc">
-                Ingresa tu nombre y correo. A este correo te enviaremos el ticket único con tu PDF de participación.
+                Te dejamos el formulario listo con tu información si ya iniciaste sesión. Solo revisa y corrige lo que necesites.
               </p>
+
               <div className="input-group">
-                <label>Nombre Completo</label>
+                <label>Nombre completo</label>
                 <input
                   type="text"
                   placeholder="Ej. Juan Pérez"
                   value={buyerName}
                   onChange={(e) => setBuyerName(e.target.value)}
+                  disabled={buying}
+                  autoComplete="name"
                 />
               </div>
+
               <div className="input-group">
-                <label>Correo Electrónico</label>
+                <label>Correo electrónico</label>
                 <input
                   type="email"
                   placeholder="Ej. juan@email.com"
                   value={buyerEmail}
                   onChange={(e) => setBuyerEmail(e.target.value)}
+                  disabled={buying}
+                  autoComplete="email"
                 />
               </div>
+
               <div className="input-group">
                 <label>Cantidad de tickets</label>
                 <input
@@ -354,28 +391,48 @@ export default function RaffleDetail() {
                     const nextQuantity = parseInt(e.target.value || '1', 10);
                     setQuantity(Number.isNaN(nextQuantity) ? 1 : Math.max(1, nextQuantity));
                   }}
+                  disabled={buying}
                 />
+                <small className="input-hint">Puedes comprar más de uno; el total se actualiza automáticamente.</small>
               </div>
-            </div>
-            <div className="modal-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', width: '100%' }}>
-                <button className="cancel-modal-btn" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button className="confirm-modal-btn" onClick={handleConfirmPurchase}>
-                  Proceder al Pago con Wompi
+
+              <div className="purchase-summary">
+                <div>
+                  <span>Ticket</span>
+                  <strong>${parseFloat(raffle.ticket_price).toFixed(2)}</strong>
+                </div>
+                <div>
+                  <span>Cantidad</span>
+                  <strong>{normalizedQuantity}</strong>
+                </div>
+                <div>
+                  <span>Total</span>
+                  <strong>${purchaseTotal}</strong>
+                </div>
+              </div>
+
+              {isOwner && (
+                <div className="purchase-note owner-note">
+                  Estás registrando un pago contra entrega. Al confirmar, guardaremos la transacción y emitiremos el ticket.
+                </div>
+              )}
+
+              <div className="modal-footer">
+                <button className="cancel-modal-btn" type="button" onClick={() => setShowModal(false)} disabled={buying}>
+                  Cancelar
+                </button>
+                <button className="confirm-modal-btn" type="submit" disabled={buying}>
+                  {buying
+                    ? (isOwner ? 'Registrando...' : 'Redirigiendo a Wompi...')
+                    : (isOwner ? 'Registrar pago contra entrega' : 'Proceder al pago con Wompi')}
                 </button>
               </div>
               {isOwner && (
-                <div style={{ marginTop: '8px', borderTop: '1px dashed var(--border)', paddingTop: '12px', width: '100%', display: 'flex', justifyContent: 'center' }}>
-                  <button 
-                    className="confirm-modal-btn" 
-                    style={{ background: 'var(--blue)', color: '#fff', width: '100%' }}
-                    onClick={handleConfirmCashPurchase}
-                  >
-                    🤝 Registrar Pago Contra Entrega (Efectivo)
-                  </button>
-                </div>
+                <p className="purchase-note" style={{ marginTop: '6px' }}>
+                  El botón principal registra el pago contra entrega cuando eres el dueño de la rifa.
+                </p>
               )}
-            </div>
+            </form>
           </div>
         </div>
       )}

@@ -4,10 +4,13 @@ import { useAuth } from '../hooks/useAuth';
 import api from '../services/api';
 import './Dashboard.css';
 
+const ADMIN_EMAIL = 'manrique.recinos23@gmail.com';
+
 export default function Dashboard() {
   const { user }     = useAuth();
   const [raffles, setRaffles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const isAdmin = user?.email === ADMIN_EMAIL;
 
   useEffect(() => {
     api.get('/raffles/mine')
@@ -35,6 +38,8 @@ export default function Dashboard() {
 
       {/* Wompi Connection Card */}
       <WompiConfigCard />
+
+      {isAdmin && <AdminPasswordPanel />}
 
       {/* Stats */}
       <div className="dash-stats">
@@ -66,6 +71,113 @@ export default function Dashboard() {
           {raffles.map(r => <DashRaffleRow key={r.id} raffle={r} />)}
         </div>
       )}
+    </div>
+  );
+}
+
+function AdminPasswordPanel() {
+  const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    api.get('/auth/admin/users')
+      .then((response) => {
+        if (!mounted) return;
+        setUsers(response.data || []);
+        if (response.data?.[0]?.id) {
+          setSelectedUserId(String(response.data[0].id));
+        }
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        setError(err.response?.data?.error || 'No se pudo cargar la lista de usuarios');
+      })
+      .finally(() => {
+        if (mounted) setLoadingUsers(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      await api.put(`/auth/admin/users/${selectedUserId}/password`, { password });
+      setSuccess('Contraseña actualizada correctamente');
+      setPassword('');
+    } catch (err) {
+      setError(err.response?.data?.error || 'No se pudo cambiar la contraseña');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="wompi-config-card" style={{ marginTop: '22px' }}>
+      <div className="wompi-config-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '24px' }}>🛡️</span>
+          <div>
+            <h3 className="wompi-config-title">Panel Admin de Contraseñas</h3>
+            <p className="wompi-config-sub">Solo disponible para el correo administrador autorizado.</p>
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="auth-error" style={{ marginBottom: '16px' }}>{error}</div>}
+      {success && <div className="wompi-success" style={{ marginBottom: '16px', color: '#4ade80', fontSize: '13px', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', padding: '10px', borderRadius: '8px' }}>{success}</div>}
+
+      <form onSubmit={handleSubmit} className="wompi-config-form">
+        <div className="wompi-form-row">
+          <div className="form-group">
+            <label>Usuario</label>
+            <select
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              disabled={loadingUsers || users.length === 0}
+              required
+            >
+              {users.length === 0 ? (
+                <option value="">No hay usuarios</option>
+              ) : (
+                users.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} - {item.email}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Nueva contraseña</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
+              minLength={6}
+              required
+            />
+          </div>
+        </div>
+
+        <button type="submit" className="wompi-save-btn" disabled={loading || loadingUsers || users.length === 0}>
+          {loading ? 'Actualizando...' : 'Cambiar contraseña'}
+        </button>
+      </form>
     </div>
   );
 }
