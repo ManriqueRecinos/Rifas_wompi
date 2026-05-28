@@ -10,6 +10,65 @@ start-dev.bat
 
 El script instala dependencias solo si falta `node_modules` y abre dos ventanas de consola, una para cada servidor.
 
+## Deploy en Railway (backend + frontend juntos)
+
+Este repo quedó preparado para desplegarse como **un solo servicio** en Railway:
+
+- Railway construye el frontend (`frontend/dist`)
+- El backend Express sirve los archivos estáticos del frontend
+- La API sigue funcionando bajo `/api/*`
+
+### 1) Conectar repositorio
+
+En Railway crea un proyecto nuevo y conecta este repositorio.
+
+### 2) Variables de entorno en Railway
+
+Configura al menos:
+
+```env
+PORT=3001
+FRONTEND_URL=https://TU_DOMINIO_RAILWAY
+BACKEND_URL=https://TU_DOMINIO_RAILWAY
+DATABASE_URL=... (o DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD)
+JWT_SECRET=...
+CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_API_KEY=...
+CLOUDINARY_API_SECRET=...
+SMTP_HOST=...
+SMTP_PORT=...
+SMTP_USER=...
+SMTP_PASS=...
+```
+
+Opcional para credenciales globales Wompi:
+
+```env
+WOMPI_APP_ID=...
+WOMPI_SECRET=...
+```
+
+### 3) Build y start
+
+Railway usará automáticamente `railway.json` del repo:
+
+- Build: `npm run install:all && npm run build`
+- Start: `npm run start`
+
+Si en Railway configuraste comandos manuales antes, déjalos así para evitar el error `Cannot find module 'express'`:
+
+```bash
+Build Command: npm run install:all && npm run build
+Start Command: npm run start
+```
+
+No uses `npm start --prefix backend` como comando principal del servicio único, porque ese modo no siempre ejecuta la instalación del frontend y puede romper el contenedor.
+
+### 4) Sobre ngrok
+
+- En **Railway no necesitas ngrok** porque ya tienes URL pública HTTPS.
+- En **desarrollo local** sí puedes usar ngrok para webhooks de Wompi.
+
 ## Requisitos previos
 - Node.js 18+
 - npm o yarn

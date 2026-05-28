@@ -1,0 +1,12 @@
+{
+  "name": "rifas-monorepo",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix backend install --include=dev && npm --prefix frontend install --include=dev",
+    "install:all": "npm --prefix backend ci --include=dev && npm --prefix frontend ci --include=dev",
+    "build": "npm --prefix frontend run build",
+    "start": "node backend/src/index.js",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}
