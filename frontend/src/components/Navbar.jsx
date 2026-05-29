@@ -15,7 +15,7 @@ export default function Navbar() {
     setMenuOpen(false);
   }, [location.pathname]);
 
-  const handleLogout = () => { logout(); setMenuOpen(false); nav('/'); };
+  const handleLogout = () => { logout(); setMenuOpen(false); nav('/login', { replace: true }); };
 
   const handleNavigate = (path) => {
     setMenuOpen(false);

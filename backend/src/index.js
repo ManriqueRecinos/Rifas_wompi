@@ -11,7 +11,7 @@ const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 const hasFrontendBuild = fs.existsSync(frontendIndexPath);
 
 // ── Middlewares ────────────────────────────────────────────────
-const allowedOrigins = [process.env.FRONTEND_URL].filter(Boolean);
+const allowedOrigins = [process.env.FRONTEND_URL, process.env.BACKEND_URL].filter(Boolean);
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
